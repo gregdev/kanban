@@ -3,6 +3,7 @@ import { useMemo, useRef } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { Virtuoso } from "react-virtuoso";
 
+import { DISTINCT_LINE_COLORS } from "@/components/shared/distinct-line-colors";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import type { RuntimeGitCommit, RuntimeGitRef } from "@/runtime/types";
@@ -41,16 +42,6 @@ function hashToColor(str: string): string {
 	return `oklch(0.65 0.12 ${hue})`;
 }
 
-const GRAPH_LANE_COLORS = [
-	"var(--color-status-blue)",
-	"var(--color-status-green)",
-	"var(--color-status-orange)",
-	"var(--color-status-violet)",
-	"var(--color-status-rose)",
-	"var(--color-status-cyan)",
-	"var(--color-status-lime)",
-	"var(--color-status-gold)",
-];
 const REMOTE_LANE_COLOR = "color-mix(in srgb, var(--color-status-blue) 75%, white 10%)";
 
 const REF_BADGE_BACKGROUND_SELECTED = "color-mix(in srgb, white 20%, transparent)";
@@ -80,7 +71,7 @@ function buildGraph(commits: RuntimeGitCommit[]): GraphRow[] {
 	let colorIndex = 0;
 
 	function nextColor(): string {
-		const color = GRAPH_LANE_COLORS[colorIndex % GRAPH_LANE_COLORS.length] ?? GRAPH_LANE_COLORS[0]!;
+		const color = DISTINCT_LINE_COLORS[colorIndex % DISTINCT_LINE_COLORS.length] ?? DISTINCT_LINE_COLORS[0]!;
 		colorIndex++;
 		return color;
 	}
@@ -172,7 +163,7 @@ function GraphSvg({ row, maxLanes }: { row: GraphRow; maxLanes: number }): React
 	const width = GRAPH_LEFT_PAD + maxLanes * LANE_WIDTH + LANE_WIDTH;
 	const centerY = ROW_HEIGHT / 2;
 	const commitX = laneX(row.commitLane);
-	const commitColor = row.lanes[row.commitLane]?.color ?? GRAPH_LANE_COLORS[0]!;
+	const commitColor = row.lanes[row.commitLane]?.color ?? DISTINCT_LINE_COLORS[0]!;
 	const isUpstreamCommit = row.commit.relation === "upstream";
 
 	return (

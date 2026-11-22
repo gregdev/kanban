@@ -1,8 +1,9 @@
 import { X } from "lucide-react";
-import type { RefObject } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-
+import { useDependencyLinkColors } from "@/components/dependencies/use-dependency-link-colors";
 import type { DependencyLinkDraft } from "@/components/dependencies/use-dependency-linking";
+import { DISTINCT_LINE_COLORS } from "@/components/shared/distinct-line-colors";
 import type { BoardColumnId, BoardDependency } from "@/types";
 
 interface TaskAnchor {
@@ -415,6 +416,22 @@ function createEmptyLayout(): DependencyLayout {
 	};
 }
 
+function DependencyArrowMarker({ id, color }: { id: string; color: string }): React.ReactElement {
+	return (
+		<marker
+			id={id}
+			viewBox="0 0 10 10"
+			refX="7"
+			refY="5"
+			markerWidth="5"
+			markerHeight="5"
+			orient="auto-start-reverse"
+		>
+			<path d="M 0 0 L 10 5 L 0 10 z" fill={color} stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+		</marker>
+	);
+}
+
 export function DependencyOverlay({
 	containerRef,
 	dependencies,
@@ -747,6 +764,12 @@ export function DependencyOverlay({
 		});
 	}, [activeTaskId, dependencies, layout.anchors, layout.height, layout.width]);
 
+	const renderedDependencyIds = useMemo(
+		() => renderedDependencies.map((rendered) => rendered.dependency.id),
+		[renderedDependencies],
+	);
+	const dependencyLinkColorsById = useDependencyLinkColors(renderedDependencyIds);
+
 	useLayoutEffect(() => {
 		const now = performance.now();
 		const nextPreviousRenderedDependencyById: Record<
@@ -883,40 +906,11 @@ export function DependencyOverlay({
 				viewBox={`0 0 ${layout.width} ${layout.height}`}
 			>
 				<defs>
-					<marker
-						id={`${markerId}-dependency-arrow`}
-						viewBox="0 0 10 10"
-						refX="7"
-						refY="5"
-						markerWidth="5"
-						markerHeight="5"
-						orient="auto-start-reverse"
-					>
-						<path
-							d="M 0 0 L 10 5 L 0 10 z"
-							fill="var(--color-accent)"
-							stroke="var(--color-accent)"
-							strokeWidth="1.2"
-							strokeLinejoin="round"
-						/>
-					</marker>
-					<marker
-						id={`${markerId}-dependency-arrow-hover`}
-						viewBox="0 0 10 10"
-						refX="7"
-						refY="5"
-						markerWidth="5"
-						markerHeight="5"
-						orient="auto-start-reverse"
-					>
-						<path
-							d="M 0 0 L 10 5 L 0 10 z"
-							fill="var(--color-status-red)"
-							stroke="var(--color-status-red)"
-							strokeWidth="1.2"
-							strokeLinejoin="round"
-						/>
-					</marker>
+					{DISTINCT_LINE_COLORS.map((color, colorIndex) => (
+						<DependencyArrowMarker key={color} id={`${markerId}-dependency-arrow-${colorIndex}`} color={color} />
+					))}
+					<DependencyArrowMarker id={`${markerId}-dependency-arrow`} color="var(--color-accent)" />
+					<DependencyArrowMarker id={`${markerId}-dependency-arrow-hover`} color="var(--color-status-red)" />
 				</defs>
 				{renderedDependencies.map((rendered) => {
 					const sideTransition = sideTransitionByDependencyIdRef.current[rendered.dependency.id];
@@ -928,12 +922,22 @@ export function DependencyOverlay({
 							)
 						: rendered.geometry;
 					const displayedPath = buildPathFromGeometry(displayedGeometry);
+					const isHovered = hoveredDependencyId === rendered.dependency.id;
+					const linkColor = dependencyLinkColorsById.get(rendered.dependency.id);
+					const arrowMarker = isHovered
+						? `${markerId}-dependency-arrow-hover`
+						: linkColor
+							? `${markerId}-dependency-arrow-${linkColor.index}`
+							: `${markerId}-dependency-arrow`;
 					return (
 						<g key={rendered.dependency.id}>
 							<path
 								d={displayedPath}
-								className={`kb-dependency-path${hoveredDependencyId === rendered.dependency.id ? " kb-dependency-path-hover" : ""}`}
-								markerEnd={`url(#${hoveredDependencyId === rendered.dependency.id ? `${markerId}-dependency-arrow-hover` : `${markerId}-dependency-arrow`})`}
+								className={`kb-dependency-path${isHovered ? " kb-dependency-path-hover" : ""}`}
+								style={
+									linkColor ? ({ "--kb-dependency-link-color": linkColor.value } as CSSProperties) : undefined
+								}
+								markerEnd={`url(#${arrowMarker})`}
 							/>
 							{onDeleteDependency && !rendered.isTransient ? (
 								<path

@@ -390,7 +390,8 @@ body,
 
 .kb-dependency-path {
 	fill: none;
-	stroke: var(--color-accent);
+	/* Each link supplies its own palette color; accent is the fallback. */
+	stroke: var(--kb-dependency-link-color, var(--color-accent));
 	stroke-width: 2;
 	stroke-linecap: round;
 	stroke-linejoin: round;
