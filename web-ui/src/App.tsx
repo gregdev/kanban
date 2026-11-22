@@ -794,7 +794,10 @@ export default function App(): ReactElement {
 		/>
 	) : undefined;
 
-	if (isRuntimeDisconnected) {
+	// Only take over the screen when we have never loaded a workspace snapshot.
+	// Once the app has rendered, a transient runtime drop must keep the shell
+	// mounted so unsent prompts and terminal state survive the reconnect.
+	if (isRuntimeDisconnected && !hasReceivedSnapshot) {
 		return <RuntimeDisconnectedFallback />;
 	}
 	if (isKanbanAccessBlocked) {
@@ -804,6 +807,7 @@ export default function App(): ReactElement {
 	return (
 		<LayoutCustomizationsProvider onResetBottomTerminalLayoutCustomizations={resetBottomTerminalLayoutCustomizations}>
 			<div className="flex h-[100svh] min-w-0 overflow-hidden">
+				{isRuntimeDisconnected ? <RuntimeDisconnectedFallback variant="overlay" /> : null}
 				{!selectedCard ? (
 					<ProjectNavigationPanel
 						projects={displayedProjects}

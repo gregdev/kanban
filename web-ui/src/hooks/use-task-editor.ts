@@ -8,8 +8,10 @@ import {
 	TASK_AUTO_REVIEW_MODE_STORAGE_KEY,
 	TASK_START_IN_PLAN_MODE_STORAGE_KEY,
 } from "@/hooks/app-utils";
+import { usePersistedTextDraft } from "@/hooks/use-persisted-text-draft";
 import type { RuntimeAgentId, RuntimeTaskClineSettings } from "@/runtime/types";
 import { addTaskToColumnWithResult, findCardSelection, updateTask, updateTaskTitle } from "@/state/board-state";
+import { createTextDraftKey } from "@/storage/text-drafts";
 import { toTelemetrySelectedAgentId, trackTaskCreated } from "@/telemetry/events";
 import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
 import { resolveTaskAutoReviewMode } from "@/types";
@@ -94,7 +96,8 @@ export function useTaskEditor({
 	queueTaskStartAfterEdit,
 }: UseTaskEditorInput): UseTaskEditorResult {
 	const [isInlineTaskCreateOpen, setIsInlineTaskCreateOpen] = useState(false);
-	const [newTaskPrompt, setNewTaskPrompt] = useState("");
+	const newTaskDraftScopeKey = createTextDraftKey({ kind: "new-task", workspaceId: currentProjectId });
+	const [newTaskPrompt, setNewTaskPrompt] = usePersistedTextDraft(newTaskDraftScopeKey);
 	const [newTaskImages, setNewTaskImages] = useState<TaskImage[]>([]);
 	const [newTaskStartInPlanMode, setNewTaskStartInPlanMode] = useBooleanLocalStorageValue(
 		TASK_START_IN_PLAN_MODE_STORAGE_KEY,
@@ -220,7 +223,7 @@ export function useTaskEditor({
 		setNewTaskBranchRef(resolvedDefaultTaskBranchRef);
 		setNewTaskAgentId(undefined);
 		setNewTaskClineSettings(undefined);
-	}, [resolvedDefaultTaskBranchRef]);
+	}, [resolvedDefaultTaskBranchRef, setNewTaskPrompt]);
 
 	const handleOpenEditTask = useCallback(
 		(task: BoardCard, options?: OpenEditTaskOptions) => {
@@ -229,7 +232,6 @@ export function useTaskEditor({
 			}
 			setIsInlineTaskCreateOpen(false);
 
-			setNewTaskPrompt("");
 			setNewTaskImages([]);
 			const taskPrompt = task.prompt.trim();
 			setEditingTaskId(task.id);
@@ -394,6 +396,7 @@ export function useTaskEditor({
 			setBoard,
 			setNewTaskAgentId,
 			setNewTaskClineSettings,
+			setNewTaskPrompt,
 		],
 	);
 
@@ -464,14 +467,13 @@ export function useTaskEditor({
 			setBoard,
 			setNewTaskAgentId,
 			setNewTaskClineSettings,
+			setNewTaskPrompt,
 		],
 	);
 
 	const resetTaskEditorState = useCallback(() => {
 		setIsInlineTaskCreateOpen(false);
 		setEditingTaskId(null);
-
-		setNewTaskPrompt("");
 
 		setEditTaskPrompt("");
 		setEditTaskStartInPlanMode(false);

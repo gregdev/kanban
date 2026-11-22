@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTaskEditor } from "@/hooks/use-task-editor";
 import type { RuntimeAgentId, RuntimeTaskClineSettings } from "@/runtime/types";
+import { createTextDraftKey, readTextDraft } from "@/storage/text-drafts";
 import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
 
 function createTask(taskId: string, prompt: string, createdAt: number, overrides: Partial<BoardCard> = {}): BoardCard {
@@ -341,6 +342,46 @@ describe("useTaskEditor", () => {
 		expect(snapshot.newTaskClineSettings).toBeUndefined();
 		expect(snapshot.board.columns[0]?.cards.some((card) => card.prompt === "Create another task")).toBe(true);
 	});
+	it("restores an unsent new-task prompt after remounting", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+		const newTaskDraftKey = createTextDraftKey({ kind: "new-task", workspaceId: "project-1" });
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					initialBoard={createBoard()}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		await act(async () => {
+			requireSnapshot(latestSnapshot).setNewTaskPrompt("Half-written task prompt");
+		});
+
+		expect(readTextDraft(newTaskDraftKey)).toBe("Half-written task prompt");
+
+		await act(async () => {
+			root.unmount();
+		});
+		root = createRoot(container);
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					initialBoard={createBoard()}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		expect(requireSnapshot(latestSnapshot).newTaskPrompt).toBe("Half-written task prompt");
+	});
+
 	it("copies attached images to each split task and clears the draft images", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 

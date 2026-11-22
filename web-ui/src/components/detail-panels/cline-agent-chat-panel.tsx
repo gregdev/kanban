@@ -147,6 +147,7 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			handleCancelTurn,
 		} = useClineChatPanelController({
 			taskId,
+			workspaceId,
 			summary,
 			taskColumnId,
 			onSendMessage,

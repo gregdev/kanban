@@ -9,6 +9,7 @@ import type {
 	RuntimeTaskSessionMode,
 	RuntimeTaskSessionSummary,
 } from "@/runtime/types";
+import { createTextDraftKey, readTextDraft } from "@/storage/text-drafts";
 import { resetWorkspaceMetadataStore, setTaskWorkspaceSnapshot } from "@/stores/workspace-metadata-store";
 
 interface HookSnapshot {
@@ -166,6 +167,7 @@ describe("useClineChatPanelController", () => {
 	let previousActEnvironment: boolean | undefined;
 
 	beforeEach(() => {
+		localStorage.clear();
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -229,6 +231,37 @@ describe("useClineChatPanelController", () => {
 		expect(requireSnapshot(latestSnapshot).draft).toBe("");
 		expect(requireSnapshot(latestSnapshot).messageIds).toEqual(["sent-1"]);
 		expect(requireSnapshot(latestSnapshot).lastMessageContent).toBe("Ship it");
+	});
+
+	it("restores an unsent draft after the panel remounts", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+		const handleSnapshot = (snapshot: HookSnapshot) => {
+			latestSnapshot = snapshot;
+		};
+
+		await act(async () => {
+			root.render(<HookHarness summary={null} onSnapshot={handleSnapshot} />);
+			await Promise.resolve();
+		});
+
+		await act(async () => {
+			requireSnapshot(latestSnapshot).setDraft("Keep this");
+			await Promise.resolve();
+		});
+
+		expect(readTextDraft(createTextDraftKey({ kind: "agent-chat", taskId: "task-1" }))).toBe("Keep this");
+
+		await act(async () => {
+			root.unmount();
+		});
+		root = createRoot(container);
+
+		await act(async () => {
+			root.render(<HookHarness summary={null} onSnapshot={handleSnapshot} />);
+			await Promise.resolve();
+		});
+
+		expect(requireSnapshot(latestSnapshot).draft).toBe("Keep this");
 	});
 
 	it("derives footer and action flags from the panel inputs", async () => {

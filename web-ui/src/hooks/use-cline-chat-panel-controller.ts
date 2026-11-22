@@ -1,15 +1,18 @@
 // Builds the view model for the native Cline chat panel.
 // Keep panel-specific UI state here so the panel component can stay mostly
 // declarative and shared across detail and sidebar surfaces.
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
 import type { ClineChatActionResult } from "@/hooks/use-cline-chat-runtime-actions";
 import { type ClineChatMessage, useClineChatSession } from "@/hooks/use-cline-chat-session";
+import { usePersistedTextDraft } from "@/hooks/use-persisted-text-draft";
 import type { RuntimeTaskImage, RuntimeTaskSessionMode, RuntimeTaskSessionSummary } from "@/runtime/types";
+import { createTextDraftKey } from "@/storage/text-drafts";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 
 interface UseClineChatPanelControllerInput {
 	taskId: string;
+	workspaceId?: string | null;
 	summary: RuntimeTaskSessionSummary | null;
 	taskColumnId?: string;
 	onSendMessage?: (
@@ -49,6 +52,7 @@ interface UseClineChatPanelControllerResult {
 
 export function useClineChatPanelController({
 	taskId,
+	workspaceId = null,
 	summary,
 	taskColumnId = "in_progress",
 	onSendMessage,
@@ -63,7 +67,8 @@ export function useClineChatPanelController({
 	cancelAutomaticActionLabel,
 	showMoveToTrash = false,
 }: UseClineChatPanelControllerInput): UseClineChatPanelControllerResult {
-	const [draft, setDraft] = useState("");
+	const draftScopeKey = createTextDraftKey({ kind: "agent-chat", workspaceId, taskId });
+	const [draft, setDraft] = usePersistedTextDraft(draftScopeKey);
 	const reviewWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(taskId);
 	const { messages, isSending, isCanceling, error, sendMessage, cancelTurn } = useClineChatSession({
 		taskId,
