@@ -26,6 +26,17 @@ import { CLINE_BUILTIN_SLASH_COMMANDS } from "./cline-slash-commands";
 import { getCliTelemetryService } from "./cline-telemetry-service";
 
 export { TelemetryLoggerSink, TelemetryService } from "@clinebot/core";
+export type {
+	AgentHooks,
+	AgentMessage,
+	AgentMessagePart,
+	AgentToolCallPart,
+	AgentToolResultPart,
+	ContentBlock,
+	MessageWithMetadata,
+	ToolResultContent,
+	ToolUseContent,
+} from "@clinebot/shared";
 
 export type ClineSdkSessionHost = ClineCore;
 export type ClineSdkBasicLogger = BasicLogger;

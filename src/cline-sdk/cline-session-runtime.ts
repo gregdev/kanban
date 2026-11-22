@@ -2,6 +2,7 @@
 // This is the runtime-facing layer for starting, looking up, resuming, and
 // stopping native Cline sessions without exposing SDK details upstream.
 import type { RuntimeClineReasoningEffort, RuntimeTaskImage, RuntimeTaskSessionMode } from "../core/api-contract";
+import { createClineConversationRepairHooks, repairClinePersistedToolResults } from "./cline-conversation-repair";
 import { extractClineSessionId } from "./cline-event-adapter";
 import {
 	type ClineMcpRuntimeService,
@@ -201,6 +202,13 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		const sessionHost = await this.ensureSessionHost();
 		const userImages = toSdkUserImages(request.images);
 		const shouldSendInitialTurn = request.prompt.trim().length > 0 || Boolean(userImages?.length);
+		// Interrupted tool executions can leave dangling tool calls in persisted
+		// history (assistant tool_use without a tool_result). Providers reject that
+		// history with "Tool result is missing for tool call ...", so repair it
+		// before replaying it into a fresh session.
+		const initialMessages = request.initialMessages
+			? repairClinePersistedToolResults(request.initialMessages)
+			: undefined;
 		let startResult: Awaited<ReturnType<ClineSessionHostBoundary["start"]>>;
 		try {
 			// Hub-backed SDK hosts create the interactive session in start; the first turn runs through send.
@@ -226,9 +234,12 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 					},
 					systemPrompt: request.systemPrompt,
 				},
-				initialMessages: request.initialMessages,
+				initialMessages,
 				interactive: true,
 				localRuntime: {
+					// Repairs dangling tool calls on every model request, including live
+					// sessions whose in-memory history was interrupted mid-tool.
+					hooks: createClineConversationRepairHooks(),
 					modelCatalogDefaults: CLINE_MODEL_CATALOG_DEFAULTS,
 					...(request.userInstructionService ? { userInstructionService: request.userInstructionService } : {}),
 					logger: createKanbanClineLogger({

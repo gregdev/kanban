@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createInMemoryClineSessionRuntime } from "../../../src/cline-sdk/cline-session-runtime";
-import type { ClineSdkSessionRecord } from "../../../src/cline-sdk/sdk-runtime-boundary";
+import type {
+	AgentHooks,
+	ClineSdkPersistedMessage,
+	ClineSdkSessionRecord,
+} from "../../../src/cline-sdk/sdk-runtime-boundary";
 
 function createNoopMcpRuntimeService() {
 	return {
@@ -886,5 +890,65 @@ describe("InMemoryClineSessionRuntime", () => {
 
 		expect(fakeHost.dispose).toHaveBeenCalledWith("kanban-runtime-dispose");
 		expect(runtime.getTaskSessionId("task-1")).toBeNull();
+	});
+
+	it("repairs dangling tool calls in replayed history and installs the request repair hook", async () => {
+		const fakeHost = {
+			start: vi.fn(
+				async (input: {
+					config?: { sessionId?: string };
+					initialMessages?: ClineSdkPersistedMessage[];
+					localRuntime?: { hooks?: AgentHooks };
+				}) => ({
+					sessionId: input.config?.sessionId ?? "session-1",
+					result: {},
+				}),
+			),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await runtime.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "",
+			initialMessages: [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call_1", name: "read_files", input: {} }],
+				},
+			],
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			systemPrompt: "You are a helpful coding assistant.",
+		});
+
+		const startInput = fakeHost.start.mock.calls[0]?.[0];
+		expect(startInput?.initialMessages).toHaveLength(2);
+		expect(startInput?.initialMessages?.[1]).toMatchObject({
+			role: "user",
+			content: [
+				{
+					type: "tool_result",
+					tool_use_id: "call_1",
+					is_error: true,
+				},
+			],
+		});
+		expect(typeof startInput?.localRuntime?.hooks?.beforeModel).toBe("function");
+
+		await runtime.dispose();
 	});
 });

@@ -16,6 +16,7 @@ import {
 	compactPersistedMessagesForContextOverflow,
 	isContextOverflowError,
 } from "./cline-context-overflow-compaction";
+import { isMissingToolResultError } from "./cline-conversation-repair";
 import { applyClineSessionEvent } from "./cline-event-adapter";
 import {
 	type ClineMessageRepository,
@@ -317,6 +318,41 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		};
 	}
 
+	// Providers reject a conversation containing an assistant tool call without
+	// a matching tool result ("Tool result is missing for tool call ..."). The
+	// live SDK session keeps that dangling call in memory, so replaying the same
+	// session fails forever. Rebuild the session from repaired persisted history.
+	private async retryAfterMissingToolResult(input: {
+		taskId: string;
+		prompt: string;
+		mode: RuntimeTaskSessionMode;
+		images?: RuntimeTaskImage[];
+		error: unknown;
+	}): Promise<{ result: unknown; warnings?: string[] } | null> {
+		if (!isMissingToolResultError(input.error)) {
+			return null;
+		}
+
+		const persistedSnapshot = await this.sessionRuntime.readPersistedTaskSession(input.taskId).catch(() => null);
+		if (!persistedSnapshot || persistedSnapshot.messages.length === 0) {
+			return null;
+		}
+
+		await this.sessionRuntime.stopTaskSession(input.taskId).catch(() => null);
+		// startTaskSession repairs dangling tool calls before replaying history.
+		const restartedSession = await this.sessionRuntime.restartTaskSession({
+			taskId: input.taskId,
+			prompt: input.prompt,
+			mode: input.mode,
+			images: input.images,
+			initialMessages: persistedSnapshot.messages,
+		});
+		return {
+			result: restartedSession.result,
+			warnings: restartedSession.warnings,
+		};
+	}
+
 	async startTaskSession(request: StartClineTaskSessionRequest): Promise<RuntimeTaskSessionSummary> {
 		const existing = this.messageRepository.getTaskEntry(request.taskId);
 		if (
@@ -604,15 +640,25 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 							delivery: queueDelivery ? "queue" : undefined,
 						});
 					} catch (error) {
-						const recovered = await this.retryAfterContextOverflow({
+						const overflowRecovered = await this.retryAfterContextOverflow({
 							taskId,
 							prompt: resolvedPrompt,
 							mode: effectiveMode,
 							images,
 							error,
 						});
-						if (recovered) {
-							return recovered;
+						if (overflowRecovered) {
+							return overflowRecovered;
+						}
+						const toolResultRecovered = await this.retryAfterMissingToolResult({
+							taskId,
+							prompt: resolvedPrompt,
+							mode: effectiveMode,
+							images,
+							error,
+						});
+						if (toolResultRecovered) {
+							return toolResultRecovered;
 						}
 						throw error;
 					}
