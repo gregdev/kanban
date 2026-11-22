@@ -41,12 +41,18 @@ const SIDEBAR_COLLAPSED_PREFERENCE: ResizeBooleanPreference = {
 
 export function useProjectNavigationLayout(): {
 	isCollapsed: boolean;
+	isExpanded: boolean;
 	setExpandedSidebarWidth: (width: number) => void;
 	setSidebarCollapsed: (collapsed: boolean, persist?: boolean) => void;
+	setSidebarExpanded: (expanded: boolean) => void;
 	sidebarWidth: number;
+	toggleSidebarExpanded: () => void;
 } {
 	const [sidebarWidth, setSidebarWidthState] = useState(() => loadResizePreference(SIDEBAR_WIDTH_PREFERENCE));
 	const [isCollapsed, setIsCollapsedState] = useState(() => loadBooleanResizePreference(SIDEBAR_COLLAPSED_PREFERENCE));
+	// Expanded mode is a transient view state: it fills the viewport while the
+	// sidebar is open and restores the persisted width when dismissed.
+	const [isExpanded, setIsExpandedState] = useState(false);
 
 	const setSidebarCollapsed = useCallback((collapsed: boolean, persist = true) => {
 		if (persist) {
@@ -54,15 +60,27 @@ export function useProjectNavigationLayout(): {
 		} else {
 			setIsCollapsedState(collapsed);
 		}
+		if (collapsed) {
+			setIsExpandedState(false);
+		}
 	}, []);
 
 	const setExpandedSidebarWidth = useCallback((width: number) => {
 		setSidebarWidthState(persistResizePreference(SIDEBAR_WIDTH_PREFERENCE, width));
 	}, []);
 
+	const setSidebarExpanded = useCallback((expanded: boolean) => {
+		setIsExpandedState(expanded);
+	}, []);
+
+	const toggleSidebarExpanded = useCallback(() => {
+		setIsExpandedState((current) => !current);
+	}, []);
+
 	useLayoutResetEffect(() => {
 		setSidebarWidthState(getResizePreferenceDefaultValue(SIDEBAR_WIDTH_PREFERENCE));
 		setIsCollapsedState(SIDEBAR_COLLAPSED_PREFERENCE.defaultValue);
+		setIsExpandedState(false);
 	});
 
 	return {
@@ -70,5 +88,8 @@ export function useProjectNavigationLayout(): {
 		setExpandedSidebarWidth,
 		isCollapsed,
 		setSidebarCollapsed,
+		isExpanded,
+		setSidebarExpanded,
+		toggleSidebarExpanded,
 	};
 }

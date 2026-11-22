@@ -1,6 +1,17 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown, ChevronUp, Ellipsis, ExternalLink, Info, Lightbulb, Plus, X } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronUp,
+	Ellipsis,
+	ExternalLink,
+	Info,
+	Lightbulb,
+	Maximize2,
+	Minimize2,
+	Plus,
+	X,
+} from "lucide-react";
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { canShowFeaturebaseFeedbackButton } from "@/components/featurebase-feedback-button";
 import { Button } from "@/components/ui/button";
@@ -18,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip } from "@/components/ui/tooltip";
 import type { FeaturebaseFeedbackState } from "@/hooks/use-featurebase-feedback-widget";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import type { RuntimeAgentId, RuntimeClineProviderSettings, RuntimeProjectSummary } from "@/runtime/types";
@@ -64,6 +76,8 @@ export function ProjectNavigationPanel({
 	setExpandedSidebarWidth,
 	isCollapsed,
 	setSidebarCollapsed,
+	isExpanded,
+	onToggleExpanded,
 }: {
 	projects: RuntimeProjectSummary[];
 	isLoadingProjects?: boolean;
@@ -83,6 +97,8 @@ export function ProjectNavigationPanel({
 	setExpandedSidebarWidth: (width: number) => void;
 	isCollapsed: boolean;
 	setSidebarCollapsed: (collapsed: boolean, persist?: boolean) => void;
+	isExpanded: boolean;
+	onToggleExpanded: () => void;
 }): React.ReactElement {
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
 	const shouldShowFeaturebaseFeedback = canShowFeaturebaseFeedbackButton({
@@ -102,6 +118,9 @@ export function ProjectNavigationPanel({
 
 	const isMobile = useIsMobile();
 	const [isMobileClosing, setIsMobileClosing] = useState(false);
+	// The fill-screen mode only applies while the agent section is visible; the
+	// panel falls back to its normal width if the section changes underneath it.
+	const isExpandedActive = isExpanded && !isMobile && !isCollapsed && activeSection === "agent";
 
 	useEffect(() => {
 		if (isMobile) {
@@ -268,26 +287,39 @@ export function ProjectNavigationPanel({
 		<aside
 			className={cn(
 				"flex flex-col min-h-0 overflow-hidden bg-surface-1 shrink-0",
-				isMobile ? "fixed inset-y-0 left-0 z-50 shadow-2xl" : "relative",
+				isMobile
+					? "fixed inset-y-0 left-0 z-50 shadow-2xl"
+					: isExpandedActive
+						? "fixed left-0 top-0 z-50 shadow-2xl"
+						: "relative",
 			)}
 			onAnimationEnd={isMobileClosing ? handleMobileCloseAnimationEnd : undefined}
 			style={
-				isMobile
+				isExpandedActive
 					? {
 							width: "100vw",
-							animation: isMobileClosing
-								? "kb-sidebar-slide-out 200ms ease forwards"
-								: "kb-sidebar-slide-in 200ms ease",
-						}
-					: {
-							width: sidebarWidth,
-							minWidth: SIDEBAR_MIN_EXPANDED_WIDTH,
-							maxWidth: SIDEBAR_MAX_EXPANDED_WIDTH,
+							minWidth: 0,
+							maxWidth: "none",
+							height: "100svh",
 							borderRight: "1px solid var(--color-divider)",
+							boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
 						}
+					: isMobile
+						? {
+								width: "100vw",
+								animation: isMobileClosing
+									? "kb-sidebar-slide-out 200ms ease forwards"
+									: "kb-sidebar-slide-in 200ms ease",
+							}
+						: {
+								width: sidebarWidth,
+								minWidth: SIDEBAR_MIN_EXPANDED_WIDTH,
+								maxWidth: SIDEBAR_MAX_EXPANDED_WIDTH,
+								borderRight: "1px solid var(--color-divider)",
+							}
 			}
 		>
-			{!isMobile && (
+			{!isMobile && !isExpandedActive && (
 				<div
 					role="separator"
 					aria-orientation="vertical"
@@ -311,6 +343,16 @@ export function ProjectNavigationPanel({
 							aria-label="Close sidebar"
 							className="min-w-[44px] min-h-[44px] -mr-2"
 						/>
+					) : activeSection === "agent" ? (
+						<Tooltip content={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}>
+							<Button
+								variant="ghost"
+								size="sm"
+								icon={isExpandedActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+								onClick={onToggleExpanded}
+								aria-label={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}
+							/>
+						</Tooltip>
 					) : null}
 				</div>
 				<div className="mt-2 rounded-md bg-surface-2 border border-border p-1">

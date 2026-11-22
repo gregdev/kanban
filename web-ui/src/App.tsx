@@ -691,6 +691,17 @@ export default function App(): ReactElement {
 	const handleToggleSidebar = useCallback(() => {
 		sidebarLayout.setSidebarCollapsed(!sidebarLayout.isCollapsed);
 	}, [sidebarLayout]);
+	// Fill-screen mode is only meaningful for the Kanban agent surface, so leaving
+	// that tab returns the sidebar to its persisted width.
+	const handleHomeSidebarSectionChange = useCallback(
+		(section: "projects" | "agent") => {
+			setHomeSidebarSection(section);
+			if (section !== "agent") {
+				sidebarLayout.setSidebarExpanded(false);
+			}
+		},
+		[sidebarLayout],
+	);
 
 	const navbarWorkspacePath = hasNoProjects ? undefined : activeWorkspacePath;
 	const navbarWorkspaceHint = hasNoProjects ? undefined : activeWorkspaceHint;
@@ -815,7 +826,7 @@ export default function App(): ReactElement {
 						currentProjectId={navigationCurrentProjectId}
 						removingProjectId={removingProjectId}
 						activeSection={homeSidebarSection}
-						onActiveSectionChange={setHomeSidebarSection}
+						onActiveSectionChange={handleHomeSidebarSectionChange}
 						canShowAgentSection={!hasNoProjects && Boolean(currentProjectId)}
 						agentSectionContent={homeSidebarAgentPanel}
 						selectedAgentId={settingsRuntimeProjectConfig?.selectedAgentId ?? null}
@@ -832,6 +843,8 @@ export default function App(): ReactElement {
 						setExpandedSidebarWidth={sidebarLayout.setExpandedSidebarWidth}
 						isCollapsed={sidebarLayout.isCollapsed}
 						setSidebarCollapsed={sidebarLayout.setSidebarCollapsed}
+						isExpanded={sidebarLayout.isExpanded}
+						onToggleExpanded={sidebarLayout.toggleSidebarExpanded}
 					/>
 				) : null}
 				<div className="flex flex-col flex-1 min-w-0 overflow-hidden">

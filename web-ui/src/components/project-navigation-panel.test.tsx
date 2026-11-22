@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectNavigationPanel } from "@/components/project-navigation-panel";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useProjectNavigationLayout } from "@/resize/use-project-navigation-layout";
 import type { RuntimeClineProviderSettings, RuntimeProjectSummary } from "@/runtime/types";
 import { LocalStorageKey } from "@/storage/local-storage-store";
@@ -15,11 +16,28 @@ vi.mock("@/resize/layout-customizations", () => ({
 function PanelWithLayout(
 	props: Omit<
 		ComponentProps<typeof ProjectNavigationPanel>,
-		"sidebarWidth" | "setExpandedSidebarWidth" | "isCollapsed" | "setSidebarCollapsed"
+		| "sidebarWidth"
+		| "setExpandedSidebarWidth"
+		| "isCollapsed"
+		| "setSidebarCollapsed"
+		| "isExpanded"
+		| "onToggleExpanded"
 	>,
 ): React.ReactElement {
 	const layout = useProjectNavigationLayout();
-	return <ProjectNavigationPanel {...props} {...layout} />;
+	return (
+		<TooltipProvider>
+			<ProjectNavigationPanel
+				{...props}
+				sidebarWidth={layout.sidebarWidth}
+				setExpandedSidebarWidth={layout.setExpandedSidebarWidth}
+				isCollapsed={layout.isCollapsed}
+				setSidebarCollapsed={layout.setSidebarCollapsed}
+				isExpanded={layout.isExpanded}
+				onToggleExpanded={layout.toggleSidebarExpanded}
+			/>
+		</TooltipProvider>
+	);
 }
 
 const SIDEBAR_MIN_EXPANDED_WIDTH = 200;
@@ -209,6 +227,77 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.textContent).toContain("Kanban is in beta. Help us improve by sharing your experience.");
 		expect(container.textContent).toContain("Send feedback");
 		expect(container.textContent).not.toContain("Report issue");
+	});
+
+	it("only surfaces the expand control for the kanban agent section", () => {
+		renderPanel();
+		expect(container.querySelector('[aria-label="Expand Kanban agent"]')).toBeNull();
+
+		renderPanel({ activeSection: "agent" });
+		expect(container.querySelector('[aria-label="Expand Kanban agent"]')).not.toBeNull();
+	});
+
+	it("expands the sidebar to fill the screen and restores its previous width", () => {
+		renderPanel({ activeSection: "agent" });
+		const sidebar = getSidebar(container);
+		const initialWidth = sidebar.style.width;
+
+		const expandButton = container.querySelector('[aria-label="Expand Kanban agent"]') as HTMLButtonElement;
+		act(() => {
+			expandButton.click();
+		});
+
+		expect(sidebar.classList.contains("fixed")).toBe(true);
+		expect(sidebar.classList.contains("relative")).toBe(false);
+		expect(sidebar.style.width).toBe("100vw");
+		expect(sidebar.style.minWidth).toBe("0");
+		expect(sidebar.style.maxWidth).toBe("none");
+		expect(sidebar.style.height).toBe("100svh");
+		expect(container.querySelector('[aria-label="Resize sidebar"]')).toBeNull();
+
+		const collapseButton = container.querySelector('[aria-label="Collapse Kanban agent"]') as HTMLButtonElement;
+		act(() => {
+			collapseButton.click();
+		});
+
+		expect(sidebar.classList.contains("relative")).toBe(true);
+		expect(sidebar.classList.contains("fixed")).toBe(false);
+		expect(sidebar.style.width).toBe(initialWidth);
+		expect(sidebar.style.maxWidth).toBe(`${SIDEBAR_MAX_EXPANDED_WIDTH}px`);
+		expect(container.querySelector('[aria-label="Resize sidebar"]')).not.toBeNull();
+	});
+
+	it("ignores expanded state when the projects section is active", () => {
+		act(() => {
+			root.render(
+				<TooltipProvider>
+					<ProjectNavigationPanel
+						projects={PROJECTS}
+						currentProjectId="project-1"
+						removingProjectId={null}
+						activeSection="projects"
+						onActiveSectionChange={() => {}}
+						canShowAgentSection
+						selectedAgentId={null}
+						clineProviderSettings={null}
+						onSelectProject={() => {}}
+						onRemoveProject={async () => true}
+						onAddProject={() => {}}
+						sidebarWidth={280}
+						setExpandedSidebarWidth={() => {}}
+						isCollapsed={false}
+						setSidebarCollapsed={() => {}}
+						isExpanded
+						onToggleExpanded={() => {}}
+					/>
+				</TooltipProvider>,
+			);
+		});
+
+		const sidebar = getSidebar(container);
+		expect(sidebar.classList.contains("relative")).toBe(true);
+		expect(sidebar.classList.contains("fixed")).toBe(false);
+		expect(sidebar.style.width).toBe("280px");
 	});
 
 	it("persists terminal tips dismissal", () => {
