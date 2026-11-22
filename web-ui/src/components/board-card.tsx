@@ -6,6 +6,7 @@ import { AlertCircle, AlertTriangle, Bot, GitBranch, Pencil, Play, RotateCcw, Tr
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { NextUpTasksBadge } from "@/components/dependencies/next-up-tasks-badge";
 import {
 	formatClineReasoningEffortLabel,
 	formatClineSelectedModelButtonText,
@@ -21,12 +22,7 @@ import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
-import {
-	clampTextWithInlineSuffix,
-	getTaskPromptDescription,
-	normalizePromptForDisplay,
-	truncateTaskPromptLabel,
-} from "@/utils/task-prompt";
+import { clampTextWithInlineSuffix, getTaskDisplayTitle, getTaskPromptDescription } from "@/utils/task-prompt";
 import { DEFAULT_TEXT_MEASURE_FONT, measureTextWidth, readElementFontShorthand } from "@/utils/text-measure";
 
 interface CardSessionActivity {
@@ -234,6 +230,7 @@ export function BoardCard({
 	isDependencyLinking = false,
 	workspacePath,
 	defaultClineModelId = null,
+	nextUpTasks,
 }: {
 	card: BoardCardModel;
 	index: number;
@@ -258,6 +255,7 @@ export function BoardCard({
 	isDependencyLinking?: boolean;
 	workspacePath?: string | null;
 	defaultClineModelId?: string | null;
+	nextUpTasks?: BoardCardModel[];
 }): React.ReactElement {
 	const [isHovered, setIsHovered] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -284,10 +282,7 @@ export function BoardCard({
 		lastSessionActivityRef.current = rawSessionActivity;
 	}
 	const sessionActivity = rawSessionActivity ?? lastSessionActivityRef.current;
-	const displayTitle = useMemo(
-		() => normalizePromptForDisplay(card.title) || truncateTaskPromptLabel(card.prompt),
-		[card.prompt, card.title],
-	);
+	const displayTitle = useMemo(() => getTaskDisplayTitle(card), [card]);
 	const displayDescription = useMemo(
 		() => getTaskPromptDescription(card.prompt, displayTitle),
 		[card.prompt, displayTitle],
@@ -652,6 +647,11 @@ export function BoardCard({
 									</Tooltip>
 								) : null}
 							</div>
+							{nextUpTasks && nextUpTasks.length > 0 ? (
+								<div className="mt-1.5">
+									<NextUpTasksBadge tasks={nextUpTasks} gatingColumnId={columnId} />
+								</div>
+							) : null}
 							{displayDescription ? (
 								<div ref={descriptionContainerRef}>
 									<p

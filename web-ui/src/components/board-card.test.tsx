@@ -212,6 +212,30 @@ describe("BoardCard", () => {
 		expect(trashButton?.querySelector("svg.animate-spin")).toBeTruthy();
 	});
 
+	it("shows the linked tasks that will run next", async () => {
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<BoardCard
+						card={createCard()}
+						index={0}
+						columnId="review"
+						nextUpTasks={[
+							createCard({
+								id: "task-2",
+								title: "Follow-up task",
+								prompt: "Follow-up task",
+							}),
+						]}
+					/>
+				</TooltipProvider>,
+			);
+		});
+
+		expect(container.textContent).toContain("Up next");
+		expect(container.textContent).toContain("Follow-up task");
+	});
+
 	it("shows inline see more and less controls for long descriptions", async () => {
 		const description =
 			"Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau final hidden segment";

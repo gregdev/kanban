@@ -115,6 +115,10 @@ export function truncateTaskPromptLabel(prompt: string, maxChars = DEFAULT_TASK_
 	return `${truncated}…`;
 }
 
+export function getTaskDisplayTitle(task: { title: string; prompt: string }): string {
+	return normalizePromptForDisplay(task.title) || truncateTaskPromptLabel(task.prompt);
+}
+
 export function clampTextWithInlineSuffix(text: string, options: InlineSuffixClampOptions): InlineSuffixClampResult {
 	const normalizedText = normalizePromptForDisplay(text);
 	if (!normalizedText) {

@@ -9,7 +9,7 @@ import {
 	type SnapDragActions,
 } from "@hello-pangea/dnd";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BoardColumn } from "@/components/board-column";
 import { DependencyOverlay } from "@/components/dependencies/dependency-overlay";
@@ -18,6 +18,7 @@ import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { canCreateTaskDependency } from "@/state/board-state";
 import { findCardColumnId, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import type { BoardCard, BoardColumnId, BoardData, BoardDependency } from "@/types";
+import { getNextUpTasksByTaskId } from "@/utils/linked-task-queue";
 
 const BOARD_COLUMN_ORDER: BoardColumnId[] = ["backlog", "in_progress", "review", "trash"];
 
@@ -96,6 +97,7 @@ export function KanbanBoard({
 		canLinkTasks: (fromTaskId, toTaskId) => canCreateTaskDependency(data, fromTaskId, toTaskId),
 		onCreateDependency,
 	});
+	const nextUpTasksByTaskId = useMemo(() => getNextUpTasksByTaskId(data), [data]);
 
 	useEffect(() => {
 		latestDataRef.current = data;
@@ -411,6 +413,7 @@ export function KanbanBoard({
 						isDependencyLinking={dependencyLinking.draft !== null}
 						workspacePath={workspacePath}
 						defaultClineModelId={defaultClineModelId}
+						nextUpTasksByTaskId={nextUpTasksByTaskId}
 						onCardClick={(card) => {
 							if (!dragOccurredRef.current) {
 								onCardSelect(card.id);
