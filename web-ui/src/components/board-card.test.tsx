@@ -745,4 +745,55 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain("checking the next file");
 		expect(container.textContent).not.toContain("Agent:");
 	});
+
+	it("shows a needs input badge and the pending question for user_attention review cards", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					sessionSummary={createSummary("awaiting_review", {
+						latestHookActivity: {
+							activityText: "Using ask_followup_question(Need approval?)",
+							toolName: "ask_followup_question",
+							toolInputSummary: "Need approval?",
+							finalMessage: null,
+							hookEventName: "tool_call",
+							notificationType: "user_attention",
+							source: "cline-sdk",
+						},
+					})}
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("Needs input");
+		expect(container.textContent).toContain("Need approval?");
+	});
+
+	it("does not show a needs input badge for a regular review card", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					sessionSummary={createSummary("awaiting_review", {
+						latestHookActivity: {
+							activityText: "Waiting for review",
+							toolName: null,
+							toolInputSummary: null,
+							finalMessage: "Finished the implementation",
+							hookEventName: "agent_end",
+							notificationType: null,
+							source: "cline-sdk",
+						},
+					})}
+				/>,
+			);
+		});
+
+		expect(container.textContent).not.toContain("Needs input");
+	});
 });

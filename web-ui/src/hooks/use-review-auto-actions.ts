@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import type { TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
+import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { findCardSelection } from "@/state/board-state";
 import { getTaskWorkspaceSnapshot, subscribeToAnyTaskMetadata } from "@/stores/workspace-metadata-store";
 import type { BoardCard, BoardColumnId, BoardData, TaskAutoReviewMode } from "@/types";
 import { resolveTaskAutoReviewMode } from "@/types";
+import { isTaskAwaitingUserInput } from "@/utils/task-attention";
 
 const AUTO_REVIEW_ACTION_DELAY_MS = 500;
 
@@ -23,6 +25,7 @@ interface RequestMoveTaskToTrashOptions {
 
 interface UseReviewAutoActionsOptions {
 	board: BoardData;
+	taskSessions: Record<string, RuntimeTaskSessionSummary>;
 	taskGitActionLoadingByTaskId: Record<string, TaskGitActionLoadingStateLike>;
 	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
 	requestMoveTaskToTrash: (
@@ -35,12 +38,14 @@ interface UseReviewAutoActionsOptions {
 
 export function useReviewAutoActions({
 	board,
+	taskSessions,
 	taskGitActionLoadingByTaskId,
 	runAutoReviewGitAction,
 	requestMoveTaskToTrash,
 	resetKey,
 }: UseReviewAutoActionsOptions): void {
 	const boardRef = useRef<BoardData>(board);
+	const taskSessionsRef = useRef<Record<string, RuntimeTaskSessionSummary>>(taskSessions);
 	const runAutoReviewGitActionRef = useRef(runAutoReviewGitAction);
 	const requestMoveTaskToTrashRef = useRef(requestMoveTaskToTrash);
 	const awaitingCleanActionByTaskIdRef = useRef<Record<string, TaskGitAction>>({});
@@ -48,10 +53,25 @@ export function useReviewAutoActions({
 	type ScheduledAutoReviewAction = TaskAutoReviewMode | "move_to_done_after_git_action";
 	const scheduledActionByTaskIdRef = useRef<Record<string, ScheduledAutoReviewAction>>({});
 	const moveToTrashInFlightTaskIdsRef = useRef<Set<string>>(new Set());
+	// Session summaries stream independently of the board, so derive a compact key
+	// for the set of tasks waiting on the user. Auto-review re-evaluates when it changes.
+	const awaitingUserInputTaskIdsKey = useMemo(
+		() =>
+			Object.values(taskSessions)
+				.filter((session) => isTaskAwaitingUserInput(session))
+				.map((session) => session.taskId)
+				.sort()
+				.join("|"),
+		[taskSessions],
+	);
 
 	useEffect(() => {
 		boardRef.current = board;
 	}, [board]);
+
+	useEffect(() => {
+		taskSessionsRef.current = taskSessions;
+	}, [taskSessions]);
 
 	useEffect(() => {
 		runAutoReviewGitActionRef.current = runAutoReviewGitAction;
@@ -162,6 +182,19 @@ export function useReviewAutoActions({
 							? loadingState?.prSource !== null && loadingState?.prSource !== undefined
 							: false;
 
+				// Never auto-commit/open a PR while the agent is waiting on the user. A
+				// task can have modified files on disk and still need an answer before
+				// the work is actually ready to ship. Drop any pending timer and, when
+				// nothing is already in flight, disarm the auto-done follow-up so we
+				// don't sweep the card to done behind a pending question.
+				if (isTaskAwaitingUserInput(taskSessionsRef.current[reviewTask.id])) {
+					clearAutoReviewTimer(reviewTask.id);
+					if (!isGitActionInFlight) {
+						delete awaitingCleanActionByTaskIdRef.current[reviewTask.id];
+					}
+					continue;
+				}
+
 				// Commit/PR automation mental model:
 				// - A task is only "armed" for auto-done after we actually see working changes in review and trigger commit/pr.
 				// - Review entries with zero changes (common during start-in-plan-mode planning loops) are intentionally ignored.
@@ -184,6 +217,9 @@ export function useReviewAutoActions({
 							}
 							const latestMode = resolveTaskAutoReviewMode(latestSelection.card.autoReviewMode);
 							if (latestMode !== autoReviewMode) {
+								return;
+							}
+							if (isTaskAwaitingUserInput(taskSessionsRef.current[reviewTask.id])) {
 								return;
 							}
 							moveToTrashInFlightTaskIdsRef.current.add(reviewTask.id);
@@ -219,6 +255,9 @@ export function useReviewAutoActions({
 					if (latestMode !== autoReviewMode) {
 						return;
 					}
+					if (isTaskAwaitingUserInput(taskSessionsRef.current[reviewTask.id])) {
+						return;
+					}
 					awaitingCleanActionByTaskIdRef.current[reviewTask.id] = latestMode;
 					void runAutoReviewGitActionRef.current(reviewTask.id, latestMode).then((triggered) => {
 						if (!triggered && awaitingCleanActionByTaskIdRef.current[reviewTask.id] === latestMode) {
@@ -236,6 +275,15 @@ export function useReviewAutoActions({
 			source: "board_or_loading_change",
 		});
 	}, [board, evaluateAutoReview, taskGitActionLoadingByTaskId]);
+
+	// Session summaries do not live on the board, so a commit scheduled just before
+	// the agent asks a question would otherwise still fire. Re-evaluate whenever the
+	// set of tasks waiting on the user changes (entering and leaving attention).
+	useEffect(() => {
+		evaluateAutoReview({
+			source: "user_attention_change",
+		});
+	}, [awaitingUserInputTaskIdsKey, evaluateAutoReview]);
 
 	useEffect(() => {
 		return subscribeToAnyTaskMetadata((taskId) => {

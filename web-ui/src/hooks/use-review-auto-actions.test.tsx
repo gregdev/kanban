@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
 import { useReviewAutoActions } from "@/hooks/use-review-auto-actions";
+import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { resetWorkspaceMetadataStore, setTaskWorkspaceSnapshot } from "@/stores/workspace-metadata-store";
 import type { BoardColumnId, BoardData, ReviewTaskWorkspaceSnapshot } from "@/types";
 
@@ -47,18 +48,57 @@ const workspaceSnapshots: Record<string, ReviewTaskWorkspaceSnapshot> = {
 	},
 };
 
+function createSessionSummary(overrides?: Partial<RuntimeTaskSessionSummary>): RuntimeTaskSessionSummary {
+	return {
+		taskId: "task-1",
+		state: "awaiting_review",
+		agentId: "cline",
+		workspacePath: "/tmp/task-1",
+		pid: null,
+		startedAt: 1,
+		updatedAt: 1,
+		lastOutputAt: 1,
+		reviewReason: null,
+		exitCode: null,
+		lastHookAt: 1,
+		latestHookActivity: null,
+		latestTurnCheckpoint: null,
+		previousTurnCheckpoint: null,
+		...overrides,
+	};
+}
+
+function createUserAttentionSessions(): Record<string, RuntimeTaskSessionSummary> {
+	return {
+		"task-1": createSessionSummary({
+			latestHookActivity: {
+				activityText: "Using ask_followup_question(Need approval?)",
+				toolName: "ask_followup_question",
+				toolInputSummary: "Need approval?",
+				finalMessage: null,
+				hookEventName: "tool_call",
+				notificationType: "user_attention",
+				source: "cline-sdk",
+			},
+		}),
+	};
+}
+
 function HookHarness({
 	board,
+	taskSessions = {},
 	runAutoReviewGitAction,
 	requestMoveTaskToTrash,
 }: {
 	board: BoardData;
+	taskSessions?: Record<string, RuntimeTaskSessionSummary>;
 	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
 	requestMoveTaskToTrash: (taskId: string, fromColumnId: BoardColumnId) => Promise<void>;
 }): null {
 	setTaskWorkspaceSnapshot(workspaceSnapshots["task-1"] ?? null);
 	useReviewAutoActions({
 		board,
+		taskSessions,
 		taskGitActionLoadingByTaskId: {},
 		runAutoReviewGitAction,
 		requestMoveTaskToTrash,
@@ -126,5 +166,64 @@ describe("useReviewAutoActions", () => {
 
 		expect(runAutoReviewGitAction).not.toHaveBeenCalled();
 		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
+	});
+
+	it("does not auto-commit while the agent is waiting on user input, even with changed files", async () => {
+		const runAutoReviewGitAction = vi.fn(async () => true);
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={createBoard(true)}
+					taskSessions={createUserAttentionSessions()}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+
+		await act(async () => {
+			vi.advanceTimersByTime(1000);
+		});
+
+		expect(runAutoReviewGitAction).not.toHaveBeenCalled();
+		expect(requestMoveTaskToTrash).not.toHaveBeenCalled();
+	});
+
+	it("resumes auto-commit once the task is no longer waiting on user input", async () => {
+		const runAutoReviewGitAction = vi.fn(async () => true);
+		const requestMoveTaskToTrash = vi.fn(async () => {});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={createBoard(true)}
+					taskSessions={createUserAttentionSessions()}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(1000);
+		});
+		expect(runAutoReviewGitAction).not.toHaveBeenCalled();
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					board={createBoard(true)}
+					taskSessions={{ "task-1": createSessionSummary({ state: "running", latestHookActivity: null }) }}
+					runAutoReviewGitAction={runAutoReviewGitAction}
+					requestMoveTaskToTrash={requestMoveTaskToTrash}
+				/>,
+			);
+		});
+		await act(async () => {
+			vi.advanceTimersByTime(1000);
+		});
+
+		expect(runAutoReviewGitAction).toHaveBeenCalledWith("task-1", "commit");
 	});
 });

@@ -3,11 +3,13 @@ import { Play, Plus, Trash2 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 import { BoardCard } from "@/components/board-card";
+import { NeedsInputCountBadge } from "@/components/needs-input-badge";
 import { Button } from "@/components/ui/button";
 import { ColumnIndicator } from "@/components/ui/column-indicator";
 import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { isCardDropDisabled, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import type { BoardCard as BoardCardModel, BoardColumnId, BoardColumn as BoardColumnModel } from "@/types";
+import { isTaskAwaitingUserInput } from "@/utils/task-attention";
 
 export function BoardColumn({
 	column,
@@ -75,6 +77,10 @@ export function BoardColumn({
 	const canCreate = column.id === "backlog" && onCreateTask;
 	const canStartAllTasks = column.id === "backlog" && onStartAllTasks;
 	const canClearTrash = column.id === "trash" && onClearTrash;
+	const needsInputCount =
+		column.id === "review"
+			? column.cards.reduce((count, card) => count + (isTaskAwaitingUserInput(taskSessions[card.id]) ? 1 : 0), 0)
+			: 0;
 	const cardDropType = "CARD";
 	const isDropDisabled = isCardDropDisabled(column.id, activeDragSourceColumnId ?? null, {
 		activeDragTaskId,
@@ -109,6 +115,7 @@ export function BoardColumn({
 						<ColumnIndicator columnId={column.id} />
 						<span className="font-semibold text-sm">{column.title}</span>
 						<span className="text-text-secondary text-xs">{column.cards.length}</span>
+						<NeedsInputCountBadge count={needsInputCount} />
 					</div>
 					{canStartAllTasks ? (
 						<Button

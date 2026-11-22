@@ -12,6 +12,7 @@ import {
 	formatClineSelectedModelButtonText,
 	resolveClineModelDisplayName,
 } from "@/components/detail-panels/cline-model-picker-options";
+import { NeedsInputBadge } from "@/components/needs-input-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
@@ -22,6 +23,7 @@ import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
+import { getTaskUserAttentionPrompt, isTaskAwaitingUserInput } from "@/utils/task-attention";
 import { clampTextWithInlineSuffix, getTaskDisplayTitle, getTaskPromptDescription } from "@/utils/task-prompt";
 import { DEFAULT_TEXT_MEASURE_FONT, measureTextWidth, readElementFontShorthand } from "@/utils/text-measure";
 
@@ -143,6 +145,12 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 	}
 	if (isCardCreditLimitError(summary)) {
 		return { dotColor: SESSION_ACTIVITY_COLOR.warning, text: "Out of credits" };
+	}
+	if (isTaskAwaitingUserInput(summary)) {
+		return {
+			dotColor: SESSION_ACTIVITY_COLOR.waiting,
+			text: getTaskUserAttentionPrompt(summary) ?? "Waiting for your response",
+		};
 	}
 	const hookActivity = summary.latestHookActivity;
 	const activityText = hookActivity?.activityText?.trim();
@@ -282,6 +290,8 @@ export function BoardCard({
 		lastSessionActivityRef.current = rawSessionActivity;
 	}
 	const sessionActivity = rawSessionActivity ?? lastSessionActivityRef.current;
+	const needsInput = columnId === "review" && isTaskAwaitingUserInput(sessionSummary);
+	const needsInputPrompt = needsInput ? getTaskUserAttentionPrompt(sessionSummary) : null;
 	const displayTitle = useMemo(() => getTaskDisplayTitle(card), [card]);
 	const displayDescription = useMemo(
 		() => getTaskPromptDescription(card.prompt, displayTitle),
@@ -647,6 +657,11 @@ export function BoardCard({
 									</Tooltip>
 								) : null}
 							</div>
+							{needsInput ? (
+								<div className="mt-1.5">
+									<NeedsInputBadge hint={needsInputPrompt} />
+								</div>
+							) : null}
 							{nextUpTasks && nextUpTasks.length > 0 ? (
 								<div className="mt-1.5">
 									<NextUpTasksBadge tasks={nextUpTasks} gatingColumnId={columnId} />
