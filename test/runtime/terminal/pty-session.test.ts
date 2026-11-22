@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ptyMocks = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ vi.mock("node-pty", () => ({
 	spawn: ptyMocks.spawn,
 }));
 
+import { clearAgentRuntimeEnvConfigCache } from "../../../src/config/agent-runtime-env";
 import { PtySession } from "../../../src/terminal/pty-session";
 
 const originalPlatform = process.platform;
@@ -299,6 +300,57 @@ describe("PtySession", () => {
 		});
 
 		expect(() => session.write("hello")).not.toThrow();
+	});
+
+	it("applies configured agent PATH additions and env to the spawn environment", () => {
+		setPlatform("darwin");
+		const tempHome = mkdtempSync(join(tmpdir(), "kanban-pty-agent-env-"));
+		const previousHome = process.env.HOME;
+		const previousPath = process.env.PATH;
+		try {
+			process.env.HOME = tempHome;
+			process.env.PATH = "/usr/bin";
+			const agentBinDir = join(tempHome, "agent-bin");
+			const configDir = join(tempHome, ".cline", "kanban");
+			mkdirSync(configDir, { recursive: true });
+			writeFileSync(
+				join(configDir, "config.json"),
+				JSON.stringify({
+					agentPathPrepend: [agentBinDir],
+					agentEnv: { KANBAN_TEST_AGENT_ENV: "configured" },
+				}),
+				"utf8",
+			);
+			clearAgentRuntimeEnvConfigCache();
+
+			ptyMocks.spawn.mockReturnValue(createMockPtyProcess());
+
+			PtySession.spawn({
+				binary: "codex",
+				args: [],
+				cwd: "/tmp",
+				cols: 120,
+				rows: 40,
+			});
+
+			const spawnOptions = ptyMocks.spawn.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+			const spawnPathEntries = (spawnOptions?.env?.PATH ?? "").split(delimiter);
+			expect(spawnPathEntries).toEqual([agentBinDir, "/usr/bin"]);
+			expect(spawnOptions?.env?.KANBAN_TEST_AGENT_ENV).toBe("configured");
+		} finally {
+			clearAgentRuntimeEnvConfigCache();
+			rmSync(tempHome, { recursive: true, force: true });
+			if (previousHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = previousHome;
+			}
+			if (previousPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = previousPath;
+			}
+		}
 	});
 
 	it("rethrows non-ignorable write errors", () => {

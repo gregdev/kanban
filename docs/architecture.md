@@ -311,6 +311,42 @@ One very important rule falls out of that table:
 
 Do not put Cline provider secrets or OAuth tokens back into `runtime-config.ts`.
 
+### Agent PATH and environment overrides
+
+Task agents run with the environment the Kanban runtime process inherited. Detection
+(`isBinaryAvailableOnPath` / `detectInstalledCommands`) deliberately inspects that same PATH
+in-process instead of spawning `which`, `command -v`, or an interactive shell, so a binary that
+is only reachable after shell init (`~/.zshrc`, `~/.bashrc`) looks uninstalled — which is the
+intended default.
+
+Users who need those binaries can opt in explicitly in `~/.cline/kanban/config.json`:
+
+```json
+{
+  "agentPathPrepend": ["~/.local/share/pnpm/bin"],
+  "agentEnv": { "PNPM_HOME": "~/.local/share/pnpm" }
+}
+```
+
+- `agentPathPrepend` accepts absolute directories (a leading `~` and `$HOME` / `${HOME}` are
+  expanded). Relative entries are dropped, duplicates are removed, and the directories are
+  prepended to `PATH`.
+- `agentEnv` adds environment variables for agent lookups and agent spawns. Only string values
+  are accepted, and nothing from the parent environment is persisted into the config file.
+  Session-level overrides that Kanban injects for an agent launch (hook variables and similar)
+  take precedence over `agentEnv`. `agentEnv` is a plain override, so setting `PATH` there
+  replaces the inherited `PATH`; use `agentPathPrepend` to add directories instead, since it is
+  always prepended on top of the merged `PATH`.
+
+Both keys are resolved by `src/config/agent-runtime-env.ts` and applied through one shared
+helper, so agent detection and the PTY launch environment (`src/terminal/pty-session.ts`) always
+agree. Leaving both keys unset keeps the inherited environment untouched.
+
+GUI desktop builds separately append common tool dirs to `PATH` before starting the runtime
+(`packages/desktop/src/runtime-child-env.ts`): `~/.local/bin`, `~/.local/share/pnpm`,
+`~/.local/share/pnpm/bin`, `~/.cargo/bin`, `~/.bun/bin`, plus `PNPM_HOME`, `PNPM_HOME/bin`, and
+`NVM_BIN` when those env vars are set.
+
 ## The Home Sidebar Agent Surface
 
 The home sidebar agent surface is one of the less obvious parts of the architecture.

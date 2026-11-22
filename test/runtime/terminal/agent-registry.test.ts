@@ -28,6 +28,8 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		openPrPromptTemplate: "pr",
 		commitPromptTemplateDefault: "commit",
 		openPrPromptTemplateDefault: "pr",
+		agentEnv: {},
+		agentPathPrepend: [],
 		...overrides,
 	};
 }

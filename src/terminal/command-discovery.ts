@@ -1,5 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
+import { applyAgentRuntimeEnv, readAgentRuntimeEnvConfig } from "../config/agent-runtime-env";
 
 function canAccessPath(path: string): boolean {
 	try {
@@ -43,6 +44,12 @@ function getWindowsExecutableCandidates(binary: string): string[] {
 // unavailable for task-agent startup. That keeps behavior predictable and aligned with the
 // environment the Kanban process already has, instead of silently relying on hidden shell
 // side effects.
+//
+// Explicit opt-in:
+// Users who need PATH contributions that normally come from shell init can declare the extra
+// directories and env vars in the global runtime config (`agentPathPrepend` / `agentEnv`).
+// Those additions are resolved through the same helper used for task-agent spawn env so
+// detection and execution never disagree about which binaries are installed.
 export function isBinaryAvailableOnPath(binary: string): boolean {
 	const trimmed = binary.trim();
 	if (!trimmed) {
@@ -52,7 +59,7 @@ export function isBinaryAvailableOnPath(binary: string): boolean {
 		return canAccessPath(trimmed);
 	}
 
-	const pathEntries = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+	const pathEntries = getSearchPathEntries();
 	if (pathEntries.length === 0) {
 		return false;
 	}
@@ -75,4 +82,11 @@ export function isBinaryAvailableOnPath(binary: string): boolean {
 		}
 	}
 	return false;
+}
+
+// Resolve the PATH entries that an agent spawn would actually see: the inherited
+// process env with any explicitly configured agent PATH additions and env vars applied.
+function getSearchPathEntries(): string[] {
+	const effectiveEnv = applyAgentRuntimeEnv(process.env, readAgentRuntimeEnvConfig());
+	return (effectiveEnv.PATH ?? "").split(delimiter).filter(Boolean);
 }

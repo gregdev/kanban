@@ -1,5 +1,6 @@
 import * as pty from "node-pty";
 
+import { applyAgentRuntimeEnv, readAgentRuntimeEnvConfig } from "../config/agent-runtime-env";
 import {
 	buildWindowsCmdArgsCommandLine,
 	resolveWindowsComSpec,
@@ -86,14 +87,18 @@ export class PtySession {
 	static spawn({ binary, args = [], cwd, env, cols, rows, onData, onExit }: SpawnPtySessionRequest): PtySession {
 		const normalizedArgs = typeof args === "string" ? [args] : args;
 		const terminalName = env?.TERM?.trim() || process.env.TERM?.trim() || "xterm-256color";
-		const launchEnv: NodeJS.ProcessEnv = env ? { ...process.env, ...env } : process.env;
+		// Session env (for example adapter-provided overrides) wins over the inherited
+		// process env, then explicitly configured agent PATH/env additions are applied so
+		// the spawned agent sees the same PATH that agent detection used.
+		const baseEnv: NodeJS.ProcessEnv = env ? { ...process.env, ...env } : process.env;
+		const launchEnv = applyAgentRuntimeEnv(baseEnv, readAgentRuntimeEnvConfig());
 		const useWindowsShellLaunch = shouldUseWindowsCmdLaunch(binary, process.platform, launchEnv);
 		const spawnBinary = useWindowsShellLaunch ? resolveWindowsComSpec(launchEnv) : binary;
 		const spawnArgs = useWindowsShellLaunch ? buildWindowsCmdArgsCommandLine(binary, normalizedArgs) : normalizedArgs;
 		const ptyOptions: pty.IPtyForkOptions = {
 			name: terminalName,
 			cwd,
-			env,
+			env: launchEnv,
 			cols,
 			rows,
 			encoding: null,

@@ -442,6 +442,150 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("normalizes configured agent env and PATH additions", async () => {
+		if (process.platform === "win32") {
+			return;
+		}
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-agent-env-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-agent-env-");
+
+		try {
+			const runtimeConfigDir = join(tempHome, ".cline", "kanban");
+			mkdirSync(runtimeConfigDir, { recursive: true });
+			writeFileSync(
+				join(runtimeConfigDir, "config.json"),
+				JSON.stringify(
+					{
+						agentPathPrepend: ["~/pnpm/bin", "relative/tools", "/opt/agent-tools", "~/pnpm/bin", "   ", 42],
+						agentEnv: {
+							PNPM_HOME: "~/.local/share/pnpm",
+							TOOL_HOME: "$HOME/tooling",
+							// biome-ignore lint/suspicious/noTemplateCurlyInString: config input, not a template
+							BRACED_HOME: "${HOME}/braced",
+							NUMERIC_VALUE: 7,
+						},
+					},
+					null,
+					2,
+				),
+				"utf8",
+			);
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const state = await loadRuntimeConfig(tempProject);
+				expect(state.agentPathPrepend).toEqual([join(tempHome, "pnpm", "bin"), "/opt/agent-tools"]);
+				expect(state.agentEnv).toEqual({
+					PNPM_HOME: join(tempHome, ".local", "share", "pnpm"),
+					TOOL_HOME: join(tempHome, "tooling"),
+					BRACED_HOME: join(tempHome, "braced"),
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("persists normalized agent env without leaking the parent environment", async () => {
+		if (process.platform === "win32") {
+			return;
+		}
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-agent-env-write-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-agent-env-write-",
+		);
+
+		try {
+			const runtimeConfigDir = join(tempHome, ".cline", "kanban");
+			mkdirSync(runtimeConfigDir, { recursive: true });
+			writeFileSync(
+				join(runtimeConfigDir, "config.json"),
+				JSON.stringify({
+					agentPathPrepend: ["~/agent-bin", "relative/agent-bin"],
+					agentEnv: { AGENT_FLAG: "1", AGENT_HOME: "~/agent-home" },
+				}),
+				"utf8",
+			);
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const updated = await updateRuntimeConfig(tempProject, { agentAutonomousModeEnabled: false });
+				expect(updated.agentPathPrepend).toEqual([join(tempHome, "agent-bin")]);
+				expect(updated.agentEnv).toEqual({
+					AGENT_FLAG: "1",
+					AGENT_HOME: join(tempHome, "agent-home"),
+				});
+
+				const persisted = JSON.parse(readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8")) as {
+					agentPathPrepend?: string[];
+					agentEnv?: Record<string, string>;
+				};
+				expect(persisted.agentPathPrepend).toEqual([join(tempHome, "agent-bin")]);
+				expect(persisted.agentEnv).toEqual({
+					AGENT_FLAG: "1",
+					AGENT_HOME: join(tempHome, "agent-home"),
+				});
+				expect(Object.keys(persisted.agentEnv ?? {})).toEqual(["AGENT_FLAG", "AGENT_HOME"]);
+
+				const reloaded = await loadRuntimeConfig(tempProject);
+				expect(reloaded.agentPathPrepend).toEqual([join(tempHome, "agent-bin")]);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("omits agent env keys when nothing is configured", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-agent-env-default-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-agent-env-default-",
+		);
+
+		try {
+			const runtimeConfigDir = join(tempHome, ".cline", "kanban");
+			mkdirSync(runtimeConfigDir, { recursive: true });
+			writeFileSync(join(runtimeConfigDir, "config.json"), "{}", "utf8");
+
+			const previousInheritedVar = process.env.KANBAN_UNRELATED_INHERITED_VAR;
+			process.env.KANBAN_UNRELATED_INHERITED_VAR = "inherited";
+			try {
+				await withTemporaryEnv({ home: tempHome }, async () => {
+					const current = await loadRuntimeConfig(tempProject);
+					expect(current.agentEnv).toEqual({});
+					expect(current.agentPathPrepend).toEqual([]);
+
+					await saveRuntimeConfig(tempProject, {
+						selectedAgentId: "cline",
+						selectedShortcutLabel: null,
+						agentAutonomousModeEnabled: true,
+						readyForReviewNotificationsEnabled: true,
+						shortcuts: [],
+						commitPromptTemplate: current.commitPromptTemplateDefault,
+						openPrPromptTemplate: current.openPrPromptTemplateDefault,
+					});
+
+					const persisted = JSON.parse(
+						readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8"),
+					) as {
+						agentEnv?: Record<string, string>;
+						agentPathPrepend?: string[];
+					};
+					expect(persisted.agentEnv).toBeUndefined();
+					expect(persisted.agentPathPrepend).toBeUndefined();
+				});
+			} finally {
+				if (previousInheritedVar === undefined) {
+					delete process.env.KANBAN_UNRELATED_INHERITED_VAR;
+				} else {
+					process.env.KANBAN_UNRELATED_INHERITED_VAR = previousInheritedVar;
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("preserves concurrent config updates across processes", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-concurrent-");
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-concurrent-");

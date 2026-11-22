@@ -11,6 +11,9 @@ const originalAppdata = process.env.APPDATA;
 const originalLocalAppdata = process.env.LOCALAPPDATA;
 const originalHomedrive = process.env.HOMEDRIVE;
 const originalHomepath = process.env.HOMEPATH;
+const originalHome = process.env.HOME;
+const originalPnpmHome = process.env.PNPM_HOME;
+const originalNvmBin = process.env.NVM_BIN;
 
 function setPlatform(value: NodeJS.Platform): void {
 	Object.defineProperty(process, "platform", {
@@ -56,6 +59,21 @@ describe("buildFilteredEnv", () => {
 			delete process.env.HOMEPATH;
 		} else {
 			process.env.HOMEPATH = originalHomepath;
+		}
+		if (originalHome === undefined) {
+			delete process.env.HOME;
+		} else {
+			process.env.HOME = originalHome;
+		}
+		if (originalPnpmHome === undefined) {
+			delete process.env.PNPM_HOME;
+		} else {
+			process.env.PNPM_HOME = originalPnpmHome;
+		}
+		if (originalNvmBin === undefined) {
+			delete process.env.NVM_BIN;
+		} else {
+			process.env.NVM_BIN = originalNvmBin;
 		}
 	});
 
@@ -155,5 +173,70 @@ describe("buildFilteredEnv", () => {
 		delete process.env.XDG_RUNTIME_DIR;
 		const env = buildFilteredEnv();
 		expect(env.XDG_RUNTIME_DIR).toBeUndefined();
+	});
+
+	it("appends per-user tool directories to the PATH on Linux", () => {
+		setPlatform("linux");
+		process.env.HOME = "/home/testuser";
+		delete process.env.PNPM_HOME;
+		delete process.env.NVM_BIN;
+		process.env.PATH = "/usr/bin";
+
+		const env = buildFilteredEnv();
+		const pathDirs = (env.PATH ?? "").split(path.delimiter);
+
+		expect(pathDirs[0]).toBe("/usr/bin");
+		for (const dir of [
+			path.join("/home/testuser", ".local", "bin"),
+			path.join("/home/testuser", ".local", "share", "pnpm"),
+			path.join("/home/testuser", ".local", "share", "pnpm", "bin"),
+			path.join("/home/testuser", ".cargo", "bin"),
+			path.join("/home/testuser", ".bun", "bin"),
+			"/usr/local/bin",
+			"/snap/bin",
+			"/bin",
+		]) {
+			expect(pathDirs).toContain(dir);
+		}
+	});
+
+	it("adds PNPM_HOME and NVM_BIN directories on Linux when those env vars are set", () => {
+		setPlatform("linux");
+		process.env.HOME = "/home/testuser";
+		process.env.PNPM_HOME = "/opt/pnpm-home";
+		process.env.NVM_BIN = "/opt/nvm/versions/node/v22.0.0/bin";
+		process.env.PATH = "/usr/bin";
+
+		const env = buildFilteredEnv();
+		const pathDirs = (env.PATH ?? "").split(path.delimiter);
+
+		expect(pathDirs).toContain("/opt/pnpm-home");
+		expect(pathDirs).toContain(path.join("/opt/pnpm-home", "bin"));
+		expect(pathDirs).toContain("/opt/nvm/versions/node/v22.0.0/bin");
+	});
+
+	it("omits PNPM_HOME and NVM_BIN directories on Linux when those env vars are unset", () => {
+		setPlatform("linux");
+		process.env.HOME = "/home/testuser";
+		delete process.env.PNPM_HOME;
+		delete process.env.NVM_BIN;
+		process.env.PATH = "/usr/bin";
+
+		const env = buildFilteredEnv();
+		const pathDirs = (env.PATH ?? "").split(path.delimiter);
+
+		expect(new Set(pathDirs)).toEqual(
+			new Set([
+				"/usr/bin",
+				"/usr/local/bin",
+				"/snap/bin",
+				"/bin",
+				path.join("/home/testuser", ".local", "bin"),
+				path.join("/home/testuser", ".local", "share", "pnpm"),
+				path.join("/home/testuser", ".local", "share", "pnpm", "bin"),
+				path.join("/home/testuser", ".cargo", "bin"),
+				path.join("/home/testuser", ".bun", "bin"),
+			]),
+		);
 	});
 });
