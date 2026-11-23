@@ -1,9 +1,10 @@
-import { act, type ComponentProps } from "react";
+import { act, type ComponentProps, useCallback } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectNavigationPanel } from "@/components/project-navigation-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAppHotkeys } from "@/hooks/use-app-hotkeys";
 import { useProjectNavigationLayout } from "@/resize/use-project-navigation-layout";
 import type { RuntimeClineProviderSettings, RuntimeProjectSummary } from "@/runtime/types";
 import { LocalStorageKey } from "@/storage/local-storage-store";
@@ -12,19 +13,46 @@ vi.mock("@/resize/layout-customizations", () => ({
 	useLayoutResetEffect: () => {},
 }));
 
-/** Wrapper that owns the sidebar layout state via the hook and passes it as props. */
-function PanelWithLayout(
-	props: Omit<
-		ComponentProps<typeof ProjectNavigationPanel>,
-		| "sidebarWidth"
-		| "setExpandedSidebarWidth"
-		| "isCollapsed"
-		| "setSidebarCollapsed"
-		| "isExpanded"
-		| "onToggleExpanded"
-	>,
-): React.ReactElement {
+type PanelWithLayoutProps = Omit<
+	ComponentProps<typeof ProjectNavigationPanel>,
+	| "sidebarWidth"
+	| "setExpandedSidebarWidth"
+	| "isCollapsed"
+	| "setSidebarCollapsed"
+	| "isExpanded"
+	| "onToggleExpanded"
+> & {
+	/** Registers the real app hotkeys so tests can exercise the sidebar shortcut end to end. */
+	enableSidebarHotkey?: boolean;
+};
+
+/**
+ * Wrapper that owns the sidebar layout state via the hook and passes it as props.
+ * Mirroring `App` keeps the hotkey path wired to the same layout state the panel uses.
+ */
+function PanelWithLayout({ enableSidebarHotkey = false, ...props }: PanelWithLayoutProps): React.ReactElement {
 	const layout = useProjectNavigationLayout();
+	const handleToggleProjectSidebar = useCallback(() => {
+		layout.setSidebarCollapsed(!layout.isCollapsed);
+	}, [layout]);
+	useAppHotkeys({
+		selectedCard: null,
+		isDetailTerminalOpen: false,
+		isHomeTerminalOpen: false,
+		isHomeGitHistoryOpen: false,
+		canUseCreateTaskShortcut: false,
+		canToggleProjectSidebar: enableSidebarHotkey,
+		handleToggleDetailTerminal: () => {},
+		handleToggleHomeTerminal: () => {},
+		handleToggleExpandDetailTerminal: () => {},
+		handleToggleExpandHomeTerminal: () => {},
+		handleOpenCreateTask: () => {},
+		handleOpenSettings: () => {},
+		handleToggleGitHistory: () => {},
+		handleCloseGitHistory: () => {},
+		handleToggleProjectSidebar,
+		onStartAllTasks: () => {},
+	});
 	return (
 		<TooltipProvider>
 			<ProjectNavigationPanel
@@ -95,6 +123,36 @@ function getButtonByText(container: HTMLElement, text: string): HTMLButtonElemen
 		throw new Error(`Button with text "${text}" was not rendered`);
 	}
 	return button;
+}
+
+function getButtonByAriaLabel(container: HTMLElement, label: string): HTMLButtonElement {
+	const button = container.querySelector(`[aria-label="${label}"]`);
+	if (!(button instanceof HTMLButtonElement)) {
+		throw new Error(`Button with aria-label "${label}" was not rendered`);
+	}
+	return button;
+}
+
+function setViewportWidth(width: number): void {
+	Object.defineProperty(window, "innerWidth", {
+		value: width,
+		configurable: true,
+		writable: true,
+	});
+}
+
+/** jsdom reports a Linux user agent, so `mod` means Ctrl in these tests. */
+function dispatchSidebarShortcut(target: EventTarget = document): void {
+	target.dispatchEvent(
+		new KeyboardEvent("keydown", {
+			key: "B",
+			code: "KeyB",
+			ctrlKey: true,
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true,
+		}),
+	);
 }
 
 describe("ProjectNavigationPanel width persistence", () => {
@@ -338,5 +396,89 @@ describe("ProjectNavigationPanel width persistence", () => {
 
 		expect(container.textContent).toContain("Tips");
 		expect(localStorage.getItem(LocalStorageKey.AgentTipsDismissed)).toBeNull();
+	});
+
+	it("does not restore a persisted collapsed rail on a wide viewport", () => {
+		localStorage.setItem(LocalStorageKey.ProjectNavigationPanelCollapsed, "true");
+		setViewportWidth(1600);
+
+		renderPanel();
+
+		expect(getSidebar(container).style.width).toBe(`${getExpectedDefaultWidthPx(1600)}px`);
+	});
+
+	it("restores a persisted collapsed rail on a narrow viewport", () => {
+		localStorage.setItem(LocalStorageKey.ProjectNavigationPanelCollapsed, "true");
+		setViewportWidth(900);
+
+		renderPanel();
+
+		expect(getSidebar(container).style.width).toBe("48px");
+	});
+
+	it("renders a visible expand control while collapsed and expands the sidebar", () => {
+		localStorage.setItem(LocalStorageKey.ProjectNavigationPanelCollapsed, "true");
+		setViewportWidth(900);
+		renderPanel();
+		expect(getSidebar(container).style.width).toBe("48px");
+
+		const expandButton = getButtonByAriaLabel(container, "Expand sidebar");
+		expect(expandButton.getAttribute("aria-expanded")).toBe("false");
+		expect(expandButton.getAttribute("aria-controls")).toBe(getSidebar(container).id);
+
+		act(() => {
+			expandButton.click();
+		});
+
+		expect(localStorage.getItem(LocalStorageKey.ProjectNavigationPanelCollapsed)).toBe("false");
+		expect(getSidebar(container).style.width).toBe(`${getExpectedDefaultWidthPx(900)}px`);
+	});
+
+	it("opens the Kanban agent from the collapsed rail", () => {
+		localStorage.setItem(LocalStorageKey.ProjectNavigationPanelCollapsed, "true");
+		setViewportWidth(900);
+		const onActiveSectionChange = vi.fn();
+		renderPanel({ activeSection: "projects", onActiveSectionChange });
+
+		const agentButton = getButtonByAriaLabel(container, "Open Kanban agent");
+		act(() => {
+			agentButton.click();
+		});
+
+		expect(onActiveSectionChange).toHaveBeenCalledWith("agent");
+		expect(localStorage.getItem(LocalStorageKey.ProjectNavigationPanelCollapsed)).toBe("false");
+		expect(getSidebar(container).style.width).toBe(`${getExpectedDefaultWidthPx(900)}px`);
+
+		// `App` applies the section change; the agent surface is then reachable.
+		renderPanel({ activeSection: "agent", onActiveSectionChange });
+		expect(container.textContent).toContain("Kanban Agent");
+		expect(container.textContent).toContain("Select a project to use the agent.");
+	});
+
+	it("toggles the sidebar with the Mod+Shift+B shortcut but not while typing in an input", () => {
+		setViewportWidth(900);
+		renderPanel({ enableSidebarHotkey: true });
+		const expandedWidth = `${getExpectedDefaultWidthPx(900)}px`;
+		expect(getSidebar(container).style.width).toBe(expandedWidth);
+
+		act(() => {
+			dispatchSidebarShortcut();
+		});
+		expect(getSidebar(container).style.width).toBe("48px");
+		expect(localStorage.getItem(LocalStorageKey.ProjectNavigationPanelCollapsed)).toBe("true");
+
+		act(() => {
+			dispatchSidebarShortcut();
+		});
+		expect(getSidebar(container).style.width).toBe(expandedWidth);
+		expect(localStorage.getItem(LocalStorageKey.ProjectNavigationPanelCollapsed)).toBe("false");
+
+		const input = document.createElement("input");
+		document.body.appendChild(input);
+		act(() => {
+			dispatchSidebarShortcut(input);
+		});
+		expect(getSidebar(container).style.width).toBe(expandedWidth);
+		input.remove();
 	});
 });

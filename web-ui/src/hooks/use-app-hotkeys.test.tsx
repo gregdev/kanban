@@ -56,6 +56,7 @@ describe("useAppHotkeys", () => {
 					isHomeTerminalOpen={false}
 					isHomeGitHistoryOpen={false}
 					canUseCreateTaskShortcut
+					canToggleProjectSidebar={false}
 					handleToggleDetailTerminal={() => {}}
 					handleToggleHomeTerminal={() => {}}
 					handleToggleExpandDetailTerminal={() => {}}
@@ -64,6 +65,7 @@ describe("useAppHotkeys", () => {
 					handleOpenSettings={handleOpenSettings}
 					handleToggleGitHistory={handleToggleGitHistory}
 					handleCloseGitHistory={() => {}}
+					handleToggleProjectSidebar={() => {}}
 					onStartAllTasks={() => {}}
 				/>,
 			);
@@ -100,6 +102,7 @@ describe("useAppHotkeys", () => {
 					isHomeTerminalOpen={false}
 					isHomeGitHistoryOpen
 					canUseCreateTaskShortcut
+					canToggleProjectSidebar={false}
 					handleToggleDetailTerminal={() => {}}
 					handleToggleHomeTerminal={() => {}}
 					handleToggleExpandDetailTerminal={() => {}}
@@ -108,6 +111,7 @@ describe("useAppHotkeys", () => {
 					handleOpenSettings={() => {}}
 					handleToggleGitHistory={() => {}}
 					handleCloseGitHistory={handleCloseGitHistory}
+					handleToggleProjectSidebar={() => {}}
 					onStartAllTasks={() => {}}
 				/>,
 			);
@@ -137,6 +141,7 @@ describe("useAppHotkeys", () => {
 					isHomeTerminalOpen={false}
 					isHomeGitHistoryOpen={false}
 					canUseCreateTaskShortcut
+					canToggleProjectSidebar={false}
 					handleToggleDetailTerminal={() => {}}
 					handleToggleHomeTerminal={() => {}}
 					handleToggleExpandDetailTerminal={() => {}}
@@ -145,6 +150,7 @@ describe("useAppHotkeys", () => {
 					handleOpenSettings={() => {}}
 					handleToggleGitHistory={() => {}}
 					handleCloseGitHistory={() => {}}
+					handleToggleProjectSidebar={() => {}}
 					onStartAllTasks={onStartAllTasks}
 				/>,
 			);
@@ -174,6 +180,7 @@ describe("useAppHotkeys", () => {
 					isHomeTerminalOpen={false}
 					isHomeGitHistoryOpen={false}
 					canUseCreateTaskShortcut={false}
+					canToggleProjectSidebar={false}
 					handleToggleDetailTerminal={() => {}}
 					handleToggleHomeTerminal={() => {}}
 					handleToggleExpandDetailTerminal={() => {}}
@@ -182,6 +189,7 @@ describe("useAppHotkeys", () => {
 					handleOpenSettings={() => {}}
 					handleToggleGitHistory={() => {}}
 					handleCloseGitHistory={() => {}}
+					handleToggleProjectSidebar={() => {}}
 					onStartAllTasks={() => {}}
 				/>,
 			);
@@ -198,5 +206,88 @@ describe("useAppHotkeys", () => {
 		});
 
 		expect(handleOpenCreateTask).not.toHaveBeenCalled();
+	});
+
+	it("toggles the project sidebar on Mod+Shift+B outside form fields only", async () => {
+		const handleToggleProjectSidebar = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					selectedCard={null}
+					isDetailTerminalOpen={false}
+					isHomeTerminalOpen={false}
+					isHomeGitHistoryOpen={false}
+					canUseCreateTaskShortcut
+					canToggleProjectSidebar
+					handleToggleDetailTerminal={() => {}}
+					handleToggleHomeTerminal={() => {}}
+					handleToggleExpandDetailTerminal={() => {}}
+					handleToggleExpandHomeTerminal={() => {}}
+					handleOpenCreateTask={() => {}}
+					handleOpenSettings={() => {}}
+					handleToggleGitHistory={() => {}}
+					handleCloseGitHistory={() => {}}
+					handleToggleProjectSidebar={handleToggleProjectSidebar}
+					onStartAllTasks={() => {}}
+				/>,
+			);
+		});
+
+		const sidebarCall = mockUseHotkeys.mock.calls.find(([shortcut]) => shortcut === "mod+shift+b");
+		if (!sidebarCall || typeof sidebarCall[1] !== "function") {
+			throw new Error("Expected project sidebar shortcut to be registered.");
+		}
+		const sidebarOptions = sidebarCall[2] as
+			| { enableOnFormTags?: boolean; enableOnContentEditable?: boolean }
+			| undefined;
+		expect(sidebarOptions?.enableOnFormTags).toBe(false);
+		expect(sidebarOptions?.enableOnContentEditable).toBe(false);
+
+		act(() => {
+			const sidebarHandler = sidebarCall[1] as () => void;
+			sidebarHandler();
+		});
+
+		expect(handleToggleProjectSidebar).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not toggle the project sidebar when the shortcut is disabled", async () => {
+		const handleToggleProjectSidebar = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					selectedCard={null}
+					isDetailTerminalOpen={false}
+					isHomeTerminalOpen={false}
+					isHomeGitHistoryOpen={false}
+					canUseCreateTaskShortcut
+					canToggleProjectSidebar={false}
+					handleToggleDetailTerminal={() => {}}
+					handleToggleHomeTerminal={() => {}}
+					handleToggleExpandDetailTerminal={() => {}}
+					handleToggleExpandHomeTerminal={() => {}}
+					handleOpenCreateTask={() => {}}
+					handleOpenSettings={() => {}}
+					handleToggleGitHistory={() => {}}
+					handleCloseGitHistory={() => {}}
+					handleToggleProjectSidebar={handleToggleProjectSidebar}
+					onStartAllTasks={() => {}}
+				/>,
+			);
+		});
+
+		const sidebarCall = mockUseHotkeys.mock.calls.find(([shortcut]) => shortcut === "mod+shift+b");
+		if (!sidebarCall || typeof sidebarCall[1] !== "function") {
+			throw new Error("Expected project sidebar shortcut to be registered.");
+		}
+
+		act(() => {
+			const sidebarHandler = sidebarCall[1] as () => void;
+			sidebarHandler();
+		});
+
+		expect(handleToggleProjectSidebar).not.toHaveBeenCalled();
 	});
 });

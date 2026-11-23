@@ -615,12 +615,38 @@ export default function App(): ReactElement {
 		setSelectedTaskId,
 	});
 
+	const sidebarLayout = useProjectNavigationLayout();
+	const canShowAgentSection = !hasNoProjects && Boolean(currentProjectId);
+	const handleToggleSidebar = useCallback(() => {
+		sidebarLayout.setSidebarCollapsed(!sidebarLayout.isCollapsed);
+	}, [sidebarLayout]);
+	// The Kanban agent lives inside the sidebar, so every entry point has to open
+	// the sidebar as well as switch sections. Leaving fill-screen mode keeps the
+	// agent at the persisted expanded width instead of temporarily taking it over.
+	const handleOpenKanbanAgent = useCallback(() => {
+		setHomeSidebarSection("agent");
+		sidebarLayout.setSidebarExpanded(false);
+		sidebarLayout.setSidebarCollapsed(false);
+	}, [sidebarLayout]);
+	// Fill-screen mode is only meaningful for the Kanban agent surface, so leaving
+	// that tab returns the sidebar to its persisted width.
+	const handleHomeSidebarSectionChange = useCallback(
+		(section: "projects" | "agent") => {
+			setHomeSidebarSection(section);
+			if (section !== "agent") {
+				sidebarLayout.setSidebarExpanded(false);
+			}
+		},
+		[sidebarLayout],
+	);
+
 	useAppHotkeys({
 		selectedCard,
 		isDetailTerminalOpen,
 		isHomeTerminalOpen: showHomeBottomTerminal,
 		isHomeGitHistoryOpen: !selectedCard && isGitHistoryOpen,
 		canUseCreateTaskShortcut: !hasNoProjects && currentProjectId !== null,
+		canToggleProjectSidebar: !selectedCard,
 		handleToggleDetailTerminal,
 		handleToggleHomeTerminal,
 		handleToggleExpandDetailTerminal,
@@ -629,6 +655,7 @@ export default function App(): ReactElement {
 		handleOpenSettings,
 		handleToggleGitHistory,
 		handleCloseGitHistory,
+		handleToggleProjectSidebar: handleToggleSidebar,
 		onStartAllTasks: handleStartAllBacklogTasksFromBoard,
 	});
 
@@ -691,22 +718,6 @@ export default function App(): ReactElement {
 		}
 		return undefined;
 	}, [selectedCard]);
-
-	const sidebarLayout = useProjectNavigationLayout();
-	const handleToggleSidebar = useCallback(() => {
-		sidebarLayout.setSidebarCollapsed(!sidebarLayout.isCollapsed);
-	}, [sidebarLayout]);
-	// Fill-screen mode is only meaningful for the Kanban agent surface, so leaving
-	// that tab returns the sidebar to its persisted width.
-	const handleHomeSidebarSectionChange = useCallback(
-		(section: "projects" | "agent") => {
-			setHomeSidebarSection(section);
-			if (section !== "agent") {
-				sidebarLayout.setSidebarExpanded(false);
-			}
-		},
-		[sidebarLayout],
-	);
 
 	const navbarWorkspacePath = hasNoProjects ? undefined : activeWorkspacePath;
 	const navbarWorkspaceHint = hasNoProjects ? undefined : activeWorkspaceHint;
@@ -832,7 +843,7 @@ export default function App(): ReactElement {
 						removingProjectId={removingProjectId}
 						activeSection={homeSidebarSection}
 						onActiveSectionChange={handleHomeSidebarSectionChange}
-						canShowAgentSection={!hasNoProjects && Boolean(currentProjectId)}
+						canShowAgentSection={canShowAgentSection}
 						agentSectionContent={homeSidebarAgentPanel}
 						selectedAgentId={settingsRuntimeProjectConfig?.selectedAgentId ?? null}
 						clineProviderSettings={settingsRuntimeProjectConfig?.clineProviderSettings ?? null}
@@ -897,6 +908,7 @@ export default function App(): ReactElement {
 						isTerminalOpen={selectedCard ? isDetailTerminalOpen : showHomeBottomTerminal}
 						isTerminalLoading={selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting}
 						onOpenSettings={handleOpenSettings}
+						onOpenKanbanAgent={!selectedCard && canShowAgentSection ? handleOpenKanbanAgent : undefined}
 						showDebugButton={debugModeEnabled}
 						onOpenDebugDialog={debugModeEnabled ? handleOpenDebugDialog : undefined}
 						shortcuts={shortcuts}

@@ -12,6 +12,7 @@ interface UseAppHotkeysInput {
 	isHomeTerminalOpen: boolean;
 	isHomeGitHistoryOpen: boolean;
 	canUseCreateTaskShortcut: boolean;
+	canToggleProjectSidebar: boolean;
 	handleToggleDetailTerminal: () => void;
 	handleToggleHomeTerminal: () => void;
 	handleToggleExpandDetailTerminal: () => void;
@@ -20,6 +21,7 @@ interface UseAppHotkeysInput {
 	handleOpenSettings: () => void;
 	handleToggleGitHistory: () => void;
 	handleCloseGitHistory: () => void;
+	handleToggleProjectSidebar: () => void;
 	onStartAllTasks: () => void;
 }
 
@@ -29,6 +31,7 @@ export function useAppHotkeys({
 	isHomeTerminalOpen,
 	isHomeGitHistoryOpen,
 	canUseCreateTaskShortcut,
+	canToggleProjectSidebar,
 	handleToggleDetailTerminal,
 	handleToggleHomeTerminal,
 	handleToggleExpandDetailTerminal,
@@ -37,6 +40,7 @@ export function useAppHotkeys({
 	handleOpenSettings,
 	handleToggleGitHistory,
 	handleCloseGitHistory,
+	handleToggleProjectSidebar,
 	onStartAllTasks,
 }: UseAppHotkeysInput): void {
 	useHotkeys(
@@ -117,6 +121,24 @@ export function useAppHotkeys({
 			preventDefault: true,
 		},
 		[handleToggleGitHistory],
+	);
+
+	useHotkeys(
+		"mod+shift+b",
+		() => {
+			if (!canToggleProjectSidebar) {
+				return;
+			}
+			handleToggleProjectSidebar();
+		},
+		{
+			// Typing a capital B in a prompt or editor must never collapse the
+			// sidebar, so this shortcut only fires outside form/contenteditable tags.
+			enableOnFormTags: false,
+			enableOnContentEditable: false,
+			preventDefault: true,
+		},
+		[canToggleProjectSidebar, handleToggleProjectSidebar],
 	);
 
 	useHotkeys(

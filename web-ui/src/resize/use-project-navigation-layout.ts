@@ -16,6 +16,11 @@ import { LocalStorageKey } from "@/storage/local-storage-store";
 const SIDEBAR_MIN_EXPANDED_WIDTH = 200;
 const SIDEBAR_MAX_EXPANDED_WIDTH = 600;
 const SIDEBAR_DEFAULT_EXPANDED_WIDTH_FALLBACK = 280;
+// A collapsed rail is persisted, but a 48px rail offers very little surface to
+// rediscover the sidebar from. On a wide first load we therefore start expanded
+// instead of restoring a collapse that was probably produced in a cramped
+// window. The stored preference is kept so narrower viewports still honor it.
+const SIDEBAR_COLLAPSED_AUTO_EXPAND_MIN_VIEWPORT_WIDTH = 1024;
 const BOARD_SURFACE_HORIZONTAL_PADDING_PX = 16;
 const BOARD_SURFACE_COLUMN_GAPS_PX = 24;
 const BOARD_SURFACE_HORIZONTAL_CHROME_PX = BOARD_SURFACE_HORIZONTAL_PADDING_PX + BOARD_SURFACE_COLUMN_GAPS_PX;
@@ -39,6 +44,18 @@ const SIDEBAR_COLLAPSED_PREFERENCE: ResizeBooleanPreference = {
 	defaultValue: false,
 };
 
+function loadInitialSidebarCollapsed(): boolean {
+	const persistedCollapsed = loadBooleanResizePreference(SIDEBAR_COLLAPSED_PREFERENCE);
+	if (!persistedCollapsed) {
+		return false;
+	}
+	const isWideViewport =
+		typeof window !== "undefined" &&
+		Number.isFinite(window.innerWidth) &&
+		window.innerWidth >= SIDEBAR_COLLAPSED_AUTO_EXPAND_MIN_VIEWPORT_WIDTH;
+	return !isWideViewport;
+}
+
 export function useProjectNavigationLayout(): {
 	isCollapsed: boolean;
 	isExpanded: boolean;
@@ -49,7 +66,7 @@ export function useProjectNavigationLayout(): {
 	toggleSidebarExpanded: () => void;
 } {
 	const [sidebarWidth, setSidebarWidthState] = useState(() => loadResizePreference(SIDEBAR_WIDTH_PREFERENCE));
-	const [isCollapsed, setIsCollapsedState] = useState(() => loadBooleanResizePreference(SIDEBAR_COLLAPSED_PREFERENCE));
+	const [isCollapsed, setIsCollapsedState] = useState(loadInitialSidebarCollapsed);
 	// Expanded mode is a transient view state: it fills the viewport while the
 	// sidebar is open and restores the persisted width when dismissed.
 	const [isExpanded, setIsExpandedState] = useState(false);

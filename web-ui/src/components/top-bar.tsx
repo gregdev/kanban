@@ -3,6 +3,7 @@ import {
 	ArrowDown,
 	ArrowLeft,
 	ArrowUp,
+	Bot,
 	Bug,
 	Check,
 	ChevronDown,
@@ -298,6 +299,7 @@ export function TopBar({
 	onToggleGitHistory,
 	isGitHistoryOpen,
 	onOpenSettings,
+	onOpenKanbanAgent,
 	showDebugButton,
 	onOpenDebugDialog,
 	shortcuts,
@@ -333,6 +335,7 @@ export function TopBar({
 	onToggleGitHistory?: () => void;
 	isGitHistoryOpen?: boolean;
 	onOpenSettings?: (section?: SettingsSection) => void;
+	onOpenKanbanAgent?: () => void;
 	showDebugButton?: boolean;
 	onOpenDebugDialog?: () => void;
 	shortcuts?: RuntimeProjectShortcut[];
@@ -671,6 +674,21 @@ export function TopBar({
 								/>
 							) : null}
 						</>
+					) : null}
+
+					{/* Kanban agent: always visible so a collapsed project rail can never strand it. */}
+					{onOpenKanbanAgent ? (
+						<Tooltip side="bottom" content="Open Kanban agent">
+							<Button
+								variant="ghost"
+								size="sm"
+								icon={<Bot size={16} />}
+								onClick={onOpenKanbanAgent}
+								aria-label="Open Kanban agent"
+								data-testid="open-kanban-agent-button"
+								className={cn("ml-0.5", isMobile && MOBILE_TOUCH_TARGET)}
+							/>
+						</Tooltip>
 					) : null}
 
 					{/* Settings: always visible */}

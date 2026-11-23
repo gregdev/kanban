@@ -1,7 +1,9 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
+	Bot,
 	ChevronDown,
+	ChevronRight,
 	ChevronUp,
 	Ellipsis,
 	ExternalLink,
@@ -62,6 +64,9 @@ const AGENT_EXPANDED_TRANSITION_MS = 200;
 const AGENT_EXPANDED_WIDTH_STYLE = `min(100vw, ${AGENT_EXPANDED_MAX_WIDTH}px)`;
 const AGENT_EXPANDED_TRANSITION = `width ${AGENT_EXPANDED_TRANSITION_MS}ms ease`;
 const GITHUB_ISSUES_URL = "https://github.com/cline/kanban/issues";
+const SIDEBAR_PANEL_ID = "project-navigation-panel";
+const SIDEBAR_EXPAND_LABEL = "Expand sidebar";
+const SIDEBAR_OPEN_AGENT_LABEL = "Open Kanban agent";
 
 interface TaskCountBadge {
 	id: string;
@@ -196,6 +201,15 @@ export function ProjectNavigationPanel({
 		setSidebarCollapsed(true, false);
 	}, [setSidebarCollapsed]);
 
+	const handleExpandSidebar = useCallback(() => {
+		setCollapsed(false);
+	}, [setCollapsed]);
+
+	const handleOpenAgentFromRail = useCallback(() => {
+		onActiveSectionChange("agent");
+		setCollapsed(false);
+	}, [onActiveSectionChange, setCollapsed]);
+
 	const [isDragging, setIsDragging] = useState(false);
 	const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 	const previousBodyStyleRef = useRef<{ userSelect: string; cursor: string } | null>(null);
@@ -275,6 +289,7 @@ export function ProjectNavigationPanel({
 	if (isCollapsed) {
 		return (
 			<aside
+				id={SIDEBAR_PANEL_ID}
 				className="flex flex-col items-center min-h-0 overflow-hidden bg-surface-1 relative shrink-0 py-2 gap-1.5"
 				style={{
 					width: collapsedWidth,
@@ -287,10 +302,41 @@ export function ProjectNavigationPanel({
 						role="separator"
 						aria-orientation="vertical"
 						aria-label="Resize sidebar"
+						title="Drag to resize"
 						onMouseDown={startDrag}
-						className="absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10"
-					/>
+						className="group absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-accent/20"
+					>
+						<span
+							aria-hidden
+							className="absolute inset-y-0 right-0 w-px bg-transparent transition-colors group-hover:bg-accent"
+						/>
+					</div>
 				)}
+				<Tooltip content={SIDEBAR_EXPAND_LABEL} side="right">
+					<Button
+						variant="ghost"
+						size="sm"
+						icon={<ChevronRight size={16} />}
+						onClick={handleExpandSidebar}
+						aria-label={SIDEBAR_EXPAND_LABEL}
+						aria-expanded={false}
+						aria-controls={SIDEBAR_PANEL_ID}
+						data-testid="expand-project-sidebar-button"
+					/>
+				</Tooltip>
+				{canShowAgentSection ? (
+					<Tooltip content={SIDEBAR_OPEN_AGENT_LABEL} side="right">
+						<Button
+							variant="ghost"
+							size="sm"
+							icon={<Bot size={16} />}
+							onClick={handleOpenAgentFromRail}
+							aria-label={SIDEBAR_OPEN_AGENT_LABEL}
+							data-testid="collapsed-open-kanban-agent-button"
+						/>
+					</Tooltip>
+				) : null}
+				<div aria-hidden className="h-px w-6 shrink-0 bg-border my-0.5" />
 				{sortedProjects.map((project) => {
 					const isCurrent = currentProjectId === project.id;
 					const letter = project.name.charAt(0).toUpperCase();
@@ -335,6 +381,7 @@ export function ProjectNavigationPanel({
 
 	return (
 		<aside
+			id={SIDEBAR_PANEL_ID}
 			className={cn(
 				"flex flex-col min-h-0 overflow-hidden bg-surface-1 shrink-0",
 				isMobile
@@ -376,9 +423,15 @@ export function ProjectNavigationPanel({
 					role="separator"
 					aria-orientation="vertical"
 					aria-label="Resize sidebar"
+					title="Drag to resize"
 					onMouseDown={startDrag}
-					className="absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10"
-				/>
+					className="group absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-accent/20"
+				>
+					<span
+						aria-hidden
+						className="absolute inset-y-0 right-0 w-px bg-transparent transition-colors group-hover:bg-accent"
+					/>
+				</div>
 			)}
 			<div style={{ padding: "12px 12px 8px" }}>
 				<div className="flex items-center justify-between">
@@ -689,6 +742,7 @@ const ESSENTIAL_SHORTCUTS = [
 	{ keys: ["Click", MOD], label: "Hold to link tasks" },
 	{ keys: [MOD, "G"], label: "Toggle git view" },
 	{ keys: [MOD, "J"], label: "Toggle terminal" },
+	{ keys: [MOD, "Shift", "B"], label: "Toggle project sidebar" },
 ];
 
 const MORE_SHORTCUTS = [

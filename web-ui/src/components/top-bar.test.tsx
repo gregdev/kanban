@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopBar } from "@/components/top-bar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 function findButtonByText(container: HTMLElement, text: string): HTMLButtonElement | null {
 	return (Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === text) ??
@@ -130,5 +131,36 @@ describe("TopBar script shortcut onboarding", () => {
 		});
 
 		expect(onOpenSettings).toHaveBeenCalledTimes(1);
+	});
+
+	it("opens the Kanban agent from the top bar", async () => {
+		const onOpenKanbanAgent = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<TopBar
+						openTargetOptions={[]}
+						selectedOpenTargetId="vscode"
+						onSelectOpenTarget={() => {}}
+						onOpenWorkspace={() => {}}
+						canOpenWorkspace={false}
+						isOpeningWorkspace={false}
+						onOpenKanbanAgent={onOpenKanbanAgent}
+					/>
+				</TooltipProvider>,
+			);
+		});
+
+		const agentButton = container.querySelector('[data-testid="open-kanban-agent-button"]');
+		expect(agentButton).toBeInstanceOf(HTMLButtonElement);
+		expect(agentButton?.getAttribute("aria-label")).toBe("Open Kanban agent");
+
+		await act(async () => {
+			(agentButton as HTMLButtonElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			(agentButton as HTMLButtonElement).click();
+		});
+
+		expect(onOpenKanbanAgent).toHaveBeenCalledTimes(1);
 	});
 });
