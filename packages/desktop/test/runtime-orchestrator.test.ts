@@ -41,8 +41,6 @@ function okResponse(): Response {
 	} as unknown as Response;
 }
 
-
-
 const { RuntimeOrchestrator } = await import("../src/runtime-orchestrator.js");
 
 describe("RuntimeOrchestrator attached-runtime crash detection", () => {
@@ -60,9 +58,7 @@ describe("RuntimeOrchestrator attached-runtime crash detection", () => {
 	it("emits 'crashed' when attached runtime fails probes past threshold", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		});
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -96,9 +92,7 @@ describe("RuntimeOrchestrator attached-runtime crash detection", () => {
 	});
 
 	it("does not emit 'crashed' while attached runtime stays healthy", async () => {
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -126,9 +120,7 @@ describe("RuntimeOrchestrator attached-runtime crash detection", () => {
 	it("resets failure count after a transient probe failure recovers", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		}) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -209,9 +201,7 @@ describe("RuntimeOrchestrator attached-runtime crash detection", () => {
 		pendingResolvers.shift()?.(okResponse());
 		await connectPromise;
 
-		const callsAfterConnect = (
-			fetchImpl as unknown as ReturnType<typeof vi.fn>
-		).mock.calls.length;
+		const callsAfterConnect = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
 
 		// Advance through 5 probe intervals while the in-flight tick is
 		// still pending. With the guard in place, only one new fetch is
@@ -220,17 +210,16 @@ describe("RuntimeOrchestrator attached-runtime crash detection", () => {
 			await vi.advanceTimersByTimeAsync(100);
 		}
 
-		const callsDuringHang = (fetchImpl as unknown as ReturnType<typeof vi.fn>)
-			.mock.calls.length - callsAfterConnect;
+		const callsDuringHang = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length - callsAfterConnect;
 		expect(callsDuringHang).toBe(1);
 
 		// Resolve the hung tick; subsequent intervals should now issue
 		// fresh probes (one per tick).
 		pendingResolvers.shift()?.(okResponse());
 		await vi.advanceTimersByTimeAsync(100);
-		expect(
-			(fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-		).toBeGreaterThan(callsAfterConnect + 1);
+		expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+			callsAfterConnect + 1,
+		);
 
 		// Drain any remaining hung promises so the test cleanup doesn't
 		// leak unresolved fetches.
@@ -283,9 +272,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 	it("auto-reattaches when a runtime returns at the last-known origin", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		}) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -326,19 +313,13 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		expect(crashed).toHaveBeenCalledTimes(1);
 		// The shell's url-changed listener would now reload every window
 		// away from disconnected.html back to the runtime.
-		expect(urlChanges).toEqual([
-			"http://127.0.0.1:3484",
-			null,
-			"http://127.0.0.1:3484",
-		]);
+		expect(urlChanges).toEqual(["http://127.0.0.1:3484", null, "http://127.0.0.1:3484"]);
 	});
 
 	it("keeps polling silently while the runtime stays down", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		}) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -375,9 +356,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 	it("stops the recovery probe when the user clicks Restart", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		}) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -403,23 +382,18 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		await orchestrator.restart();
 		expect(orchestrator.isOwned()).toBe(true);
 
-		const callsAfterRestart = (fetchImpl as unknown as ReturnType<typeof vi.fn>)
-			.mock.calls.length;
+		const callsAfterRestart = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
 
 		// Advance well past several recovery intervals; no more probes.
 		await vi.advanceTimersByTimeAsync(1_000);
 
-		expect(
-			(fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-		).toBe(callsAfterRestart);
+		expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterRestart);
 	});
 
 	it("stops the recovery probe after dispose()", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		}) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -438,23 +412,17 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		await vi.advanceTimersByTimeAsync(100);
 		await vi.advanceTimersByTimeAsync(100);
 
-		const callsBeforeDispose = (
-			fetchImpl as unknown as ReturnType<typeof vi.fn>
-		).mock.calls.length;
+		const callsBeforeDispose = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
 
 		await orchestrator.dispose();
 
 		await vi.advanceTimersByTimeAsync(1_000);
 
-		expect(
-			(fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-		).toBe(callsBeforeDispose);
+		expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBeforeDispose);
 	});
 
 	it("clears URL when restart's spawn fails so the shell isn't left pointing at a dead origin", async () => {
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -475,9 +443,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		expect(orchestrator.isOwned()).toBe(true);
 		expect(orchestrator.getUrl()).toBe("http://127.0.0.1:3484");
 
-		const failOnStart = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockRejectedValueOnce(new Error("port in use"));
+		const failOnStart = vi.spyOn(FakeChildManager.prototype, "start").mockRejectedValueOnce(new Error("port in use"));
 
 		await expect(orchestrator.restart()).rejects.toThrow("port in use");
 
@@ -495,9 +461,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// The shutdown branch is skipped, so the URL clear must happen
 		// unconditionally — otherwise getUrl() would keep returning the old
 		// attached origin after the spawn throws.
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -514,9 +478,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		expect(orchestrator.isOwned()).toBe(false);
 		expect(orchestrator.getUrl()).toBe("http://127.0.0.1:3484");
 
-		const failOnStart = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockRejectedValueOnce(new Error("port in use"));
+		const failOnStart = vi.spyOn(FakeChildManager.prototype, "start").mockRejectedValueOnce(new Error("port in use"));
 
 		await expect(orchestrator.restart()).rejects.toThrow("port in use");
 
@@ -527,9 +489,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 	});
 
 	it("starts recovery probe on owned-child crash event", async () => {
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -626,9 +586,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// the spawn fails (port in use, missing CLI shim, etc.). Without
 		// invalidation, the recovery tick's late `setUrl(oldOrigin, false)`
 		// would re-attach behind restart's back.
-		const failOnStart = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockRejectedValueOnce(new Error("port in use"));
+		const failOnStart = vi.spyOn(FakeChildManager.prototype, "start").mockRejectedValueOnce(new Error("port in use"));
 
 		const urlChanges: Array<string | null> = [];
 		orchestrator.on("url-changed", (u) => urlChanges.push(u));
@@ -656,9 +614,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// emitting another `crashed` (or `error`) event would re-enter
 		// `handleCrash`, double-counting the failure and resetting the
 		// recovery probe mid-flight.
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -706,9 +662,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// emit because the no-op-transition guard sees no change, and
 		// any code path that does `if (!this.manager)` (like
 		// `startOwnRuntime`) would reuse the dead manager.
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -739,13 +693,9 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		expect(urlChanges).toEqual([null]);
 
 		// Sanity: probes don't fire after shutdown.
-		const callsAfterShutdown = (
-			fetchImpl as unknown as ReturnType<typeof vi.fn>
-		).mock.calls.length;
+		const callsAfterShutdown = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
 		await vi.advanceTimersByTimeAsync(1_000);
-		expect(
-			(fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-		).toBe(callsAfterShutdown);
+		expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterShutdown);
 	});
 
 	it("clears URL before manager.shutdown() so getUrl() doesn't return the dead origin mid-restart", async () => {
@@ -755,9 +705,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// graceful shutdown of the child, `getUrl()` keeps returning the
 		// origin we're about to kill — anything that opens a window or
 		// reloads during that window would point at a dying runtime.
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -781,9 +729,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		const shutdownHeld = new Promise<void>((resolve) => {
 			releaseShutdown = resolve;
 		});
-		const shutdownSpy = vi
-			.spyOn(FakeChildManager.prototype, "shutdown")
-			.mockImplementationOnce(() => shutdownHeld);
+		const shutdownSpy = vi.spyOn(FakeChildManager.prototype, "shutdown").mockImplementationOnce(() => shutdownHeld);
 
 		// Kick off restart but don't await yet.
 		const restartPromise = orchestrator.restart();
@@ -812,9 +758,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// Symmetric to the shutdown postcondition test — `dispose()` is
 		// the other terminal lifecycle method and consumers should not
 		// have to remember which one clears state.
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -901,19 +845,14 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// orphan-cleanup branch kill the spawn. Sibling `dispose()`
 		// test below covers the same race via the other terminal entry
 		// point.
-		const fetchImpl = vi.fn(
-
-			async () => Promise.reject(new Error("ECONNREFUSED")),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
 
 		// Hold manager.start() so shutdown() can land mid-spawn.
 		let releaseStart!: (url: string) => void;
 		const startHeld = new Promise<string>((resolve) => {
 			releaseStart = resolve;
 		});
-		const startSpy = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockImplementationOnce(() => startHeld);
+		const startSpy = vi.spyOn(FakeChildManager.prototype, "start").mockImplementationOnce(() => startHeld);
 		const shutdownSpy = vi.spyOn(FakeChildManager.prototype, "shutdown");
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -972,7 +911,6 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 	});
 
 	it("dispose() during connect()'s startOwnRuntime() does not leak an orphan child", async () => {
-
 		// Regression: connect() falls through to startOwnRuntime() when
 		// checkHealth fails; if dispose() runs while manager.start() is
 		// suspended, the spawn must either be skipped (if dispose lands
@@ -981,18 +919,14 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// this, a slow startup + user quit leaves an orphan runtime
 		// process running with no orchestrator owner.
 
-		const fetchImpl = vi.fn(
-			async () => Promise.reject(new Error("ECONNREFUSED")),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
 
 		// Hold manager.start() open so we can fire dispose() mid-spawn.
 		let releaseStart!: (url: string) => void;
 		const startHeld = new Promise<string>((resolve) => {
 			releaseStart = resolve;
 		});
-		const startSpy = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockImplementationOnce(() => startHeld);
+		const startSpy = vi.spyOn(FakeChildManager.prototype, "start").mockImplementationOnce(() => startHeld);
 		const shutdownSpy = vi.spyOn(FakeChildManager.prototype, "shutdown");
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -1050,9 +984,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		// restart IIFE bails post-await without spawning a new child, and
 		// shutdown's own teardown finds no dangling manager.
 
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -1078,9 +1010,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		const shutdownHeld = new Promise<void>((resolve) => {
 			releaseShutdown = resolve;
 		});
-		const shutdownSpy = vi
-			.spyOn(FakeChildManager.prototype, "shutdown")
-			.mockImplementationOnce(() => shutdownHeld);
+		const shutdownSpy = vi.spyOn(FakeChildManager.prototype, "shutdown").mockImplementationOnce(() => shutdownHeld);
 
 		const restartPromise = orchestrator.restart();
 		// Yield microtasks until restart enters its manager.shutdown await.
@@ -1112,9 +1042,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 	it("idempotent shutdown(): second call after drain is a no-op", async () => {
 		// Belt-and-suspenders for the `terminated` latch — a second
 		// shutdown/dispose call must not re-run any teardown side effects.
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -1145,9 +1073,7 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 	it("does not start recovery when recoveryProbeIntervalMs is 0", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		}) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -1167,17 +1093,13 @@ describe("RuntimeOrchestrator post-crash recovery probe", () => {
 		await vi.advanceTimersByTimeAsync(100);
 		expect(orchestrator.getUrl()).toBeNull();
 
-		const callsAfterCrash = (
-			fetchImpl as unknown as ReturnType<typeof vi.fn>
-		).mock.calls.length;
+		const callsAfterCrash = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
 
 		// Bring the runtime back — with recovery disabled, nothing watches.
 		healthy = true;
 		await vi.advanceTimersByTimeAsync(1_000);
 
-		expect(
-			(fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-		).toBe(callsAfterCrash);
+		expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterCrash);
 		expect(orchestrator.getUrl()).toBeNull();
 	});
 });
@@ -1208,9 +1130,7 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 			port: 3484,
 			healthTimeoutMs: 500,
 			resolveCliShimPath: () => process.execPath,
-			fetchImpl: vi.fn(async () =>
-				Promise.reject(new Error("ECONNREFUSED")),
-			) as unknown as typeof fetch,
+			fetchImpl: vi.fn(async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch,
 			recoveryProbeIntervalMs: 100,
 		});
 
@@ -1262,9 +1182,7 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 			port: 3484,
 			healthTimeoutMs: 500,
 			resolveCliShimPath: () => process.execPath,
-			fetchImpl: vi.fn(async () =>
-				Promise.reject(new Error("ECONNREFUSED")),
-			) as unknown as typeof fetch,
+			fetchImpl: vi.fn(async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch,
 			recoveryProbeIntervalMs: 0,
 		});
 
@@ -1314,33 +1232,27 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		// orchestrator's downstream behavior — and additionally by
 		// counting how many distinct call sites invoke
 		// `removeAllListeners` on the doomed manager.
-		const fetchImpl = vi.fn(
-			async () => Promise.reject(new Error("ECONNREFUSED")),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
 
 		// Hold manager.start() so dispose() can land mid-spawn.
 		let releaseStart!: (url: string) => void;
 		const startHeld = new Promise<string>((resolve) => {
 			releaseStart = resolve;
 		});
-		const startSpy = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockImplementationOnce(() => startHeld);
+		const startSpy = vi.spyOn(FakeChildManager.prototype, "start").mockImplementationOnce(() => startHeld);
 
 		// shutdown() — invoked by the orphan-cleanup branch — fires a
 		// crashed event mid-await. handleCrash() will set
 		// `this.manager = null` synchronously, modeling the exact race
 		// the local-capture fix is meant to handle.
 		let crashedDuringShutdown = false;
-		const shutdownSpy = vi
-			.spyOn(FakeChildManager.prototype, "shutdown")
-			.mockImplementationOnce(async function (
-				this: InstanceType<typeof FakeChildManager>,
-			) {
-				this.emit("crashed", 0, null, "");
-				crashedDuringShutdown = true;
-				await Promise.resolve();
-			});
+		const shutdownSpy = vi.spyOn(FakeChildManager.prototype, "shutdown").mockImplementationOnce(async function (
+			this: InstanceType<typeof FakeChildManager>,
+		) {
+			this.emit("crashed", 0, null, "");
+			crashedDuringShutdown = true;
+			await Promise.resolve();
+		});
 
 		// Spy on the EventEmitter's `removeAllListeners` so we can
 		// distinguish the buggy and fixed paths. With the fix:
@@ -1353,10 +1265,7 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		//                    because `this.manager` is null → 0 successful calls
 		//   total: 2 invocations
 		// The exact 4-vs-2 count makes this a true mutation-killing assertion.
-		const removeAllListenersSpy = vi.spyOn(
-			FakeChildManager.prototype,
-			"removeAllListeners",
-		);
+		const removeAllListenersSpy = vi.spyOn(FakeChildManager.prototype, "removeAllListeners");
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -1428,7 +1337,6 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 	// `child_process.spawn`.
 	// -----------------------------------------------------------------
 
-
 	it("resolveCliShimPath is called once and cached across multiple child spawns", async () => {
 		const fetchImpl = vi.fn(async () => ({ ok: false }) as Response);
 		const resolveCliShimPath = vi.fn(() => process.execPath);
@@ -1475,13 +1383,9 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		// `connect()` falls through to `startOwnRuntime()` which calls
 		// `createManager()` → `getValidatedShimPath()` and should throw
 		// before any child is spawned.
-		await expect(orchestrator.connect()).rejects.toThrow(
-			/CLI shim not found at .*intentionally.*does.*not.*exist/,
-		);
+		await expect(orchestrator.connect()).rejects.toThrow(/CLI shim not found at .*intentionally.*does.*not.*exist/);
 		// And the error is *actionable* — it names the remediation path.
-		await expect(orchestrator.connect()).rejects.toThrow(
-			/pnpm run stage:cli/,
-		);
+		await expect(orchestrator.connect()).rejects.toThrow(/pnpm run stage:cli/);
 		// No child was spawned (no FakeChildManager was constructed since
 		// the `new RuntimeChildManager(...)` line is past the validation).
 		expect(childManagers.length).toBe(0);
@@ -1498,7 +1402,6 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 	// conscious decision about whether the renderer reload is wanted.
 	// -----------------------------------------------------------------
 
-
 	// handleCrash must arm recovery BEFORE setUrl(null)'s synchronous
 	// emit, so a re-entrant restart() from a url-changed listener can
 	// stop the just-armed probe instead of racing with handleCrash to
@@ -1506,9 +1409,7 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 	it("arms recovery before the synchronous url-changed(null) emit so a re-entrant restart can stop it", async () => {
 		let healthy = true;
 		const fetchImpl = vi.fn(async () => {
-			return healthy
-				? okResponse()
-				: Promise.reject(new Error("ECONNREFUSED"));
+			return healthy ? okResponse() : Promise.reject(new Error("ECONNREFUSED"));
 		});
 
 		const orchestrator = new RuntimeOrchestrator({
@@ -1531,9 +1432,7 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		const startHeld = new Promise<string>((resolve) => {
 			releaseStart = resolve;
 		});
-		const startSpy = vi
-			.spyOn(FakeChildManager.prototype, "start")
-			.mockImplementationOnce(() => startHeld);
+		const startSpy = vi.spyOn(FakeChildManager.prototype, "start").mockImplementationOnce(() => startHeld);
 
 		// Mutation-killing signal: the `owned` flag at each emission.
 		// Fix: third event is {origin, owned: true} from startOwnRuntime.
@@ -1585,12 +1484,8 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		startSpy.mockRestore();
 	});
 
-
 	it("does not emit a spurious 'crashed' event when the child crashes during restart's shutdown", async () => {
-
-		const fetchImpl = vi.fn(
-			async () => okResponse(),
-		) as unknown as typeof fetch;
+		const fetchImpl = vi.fn(async () => okResponse()) as unknown as typeof fetch;
 
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -1620,15 +1515,13 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		orchestrator.on("crashed", crashedSpy);
 		orchestrator.on("url-changed", (u) => urlChanges.push(u));
 
-		const shutdownSpy = vi
-			.spyOn(FakeChildManager.prototype, "shutdown")
-			.mockImplementationOnce(async function (
-				this: InstanceType<typeof FakeChildManager>,
-			) {
-				// Fire crashed mid-shutdown, exactly the SIGKILL-after-timeout
-				// case greptile flagged.
-				this.emit("crashed", -1, "SIGKILL", "");
-			});
+		const shutdownSpy = vi.spyOn(FakeChildManager.prototype, "shutdown").mockImplementationOnce(async function (
+			this: InstanceType<typeof FakeChildManager>,
+		) {
+			// Fire crashed mid-shutdown, exactly the SIGKILL-after-timeout
+			// case greptile flagged.
+			this.emit("crashed", -1, "SIGKILL", "");
+		});
 
 		await orchestrator.restart();
 
@@ -1646,20 +1539,14 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		// fetches to the lastKnownOrigin during the restart window).
 		// Advance well past the recovery interval; if the bug re-armed
 		// the probe, it would have fired before startOwnRuntime resolved.
-		const callsAfterRestart = (
-			fetchImpl as unknown as ReturnType<typeof vi.fn>
-		).mock.calls.length;
+		const callsAfterRestart = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
 		await vi.advanceTimersByTimeAsync(500);
-		expect(
-			(fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-		).toBe(callsAfterRestart);
+		expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterRestart);
 
 		shutdownSpy.mockRestore();
 	});
 
 	it("emits url-changed exactly once per public-API URL transition (contract-lock)", async () => {
-
-
 		const fetchImpl = vi.fn(async () => ({ ok: false }) as Response);
 		const orchestrator = new RuntimeOrchestrator({
 			host: "127.0.0.1",
@@ -1684,22 +1571,12 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		//   url → null  (clear before shutdown)
 		//   null → url  (after fresh spawn)
 		await orchestrator.restart();
-		expect(emitted).toEqual([
-			"http://127.0.0.1:3484",
-			null,
-			"http://127.0.0.1:3484",
-		]);
+		expect(emitted).toEqual(["http://127.0.0.1:3484", null, "http://127.0.0.1:3484"]);
 
 		// shutdown() → setUrl(null, false). One more transition: url → null.
 		await orchestrator.shutdown();
-		expect(emitted).toEqual([
-			"http://127.0.0.1:3484",
-			null,
-			"http://127.0.0.1:3484",
-			null,
-		]);
+		expect(emitted).toEqual(["http://127.0.0.1:3484", null, "http://127.0.0.1:3484", null]);
 	});
-
 });
 
 // ---------------------------------------------------------------------
@@ -1811,6 +1688,3 @@ describe("RuntimeOrchestrator health-probe runtime identification", () => {
 		await orchestrator.dispose();
 	});
 });
-
-
-

@@ -4,9 +4,7 @@ import { powerSaveBlocker } from "electron";
 
 import { RuntimeChildManager } from "./runtime-child.js";
 
-
 interface RuntimeOrchestratorOptions {
-
 	host: string;
 	port: number;
 	healthTimeoutMs: number;
@@ -39,7 +37,6 @@ const POWER_SAVE_BLOCKER_INACTIVE = -1;
 export const KANBAN_RUNTIME_TITLE = "<title>Kanban</title>";
 
 export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMap> {
-
 	private manager: RuntimeChildManager | null = null;
 	private url: string | null = null;
 	private ownsChild = false;
@@ -102,10 +99,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 	async checkHealth(origin: string): Promise<boolean> {
 		const fetchFn = this.opts.fetchImpl ?? globalThis.fetch;
 		const controller = new AbortController();
-		const timer = setTimeout(
-			() => controller.abort(),
-			this.opts.healthTimeoutMs,
-		);
+		const timer = setTimeout(() => controller.abort(), this.opts.healthTimeoutMs);
 		try {
 			const res = await fetchFn(`${origin}/`, {
 				signal: controller.signal,
@@ -115,13 +109,11 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 			const body = await res.text();
 			return body.includes(KANBAN_RUNTIME_TITLE);
 		} catch {
-
 			return false;
 		} finally {
 			clearTimeout(timer);
 		}
 	}
-
 
 	async connect(): Promise<void> {
 		if (this.terminated) return;
@@ -201,7 +193,6 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 			}
 			if (this.terminated) return;
 			await this.startOwnRuntime();
-
 		})().finally(() => {
 			this.restartPromise = null;
 		});
@@ -227,10 +218,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 		this.stopRecoveryProbe();
 		if (this.manager && this.ownsChild) {
 			await this.manager.shutdown().catch((err) => {
-				console.error(
-					"[desktop] Runtime shutdown error:",
-					err instanceof Error ? err.message : err,
-				);
+				console.error("[desktop] Runtime shutdown error:", err instanceof Error ? err.message : err);
 			});
 		}
 		// Clear orchestrator state so post-shutdown observers (`getUrl()`,
@@ -271,10 +259,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 		const manager = this.manager;
 		if (manager) {
 			await manager.dispose().catch((err) => {
-				console.warn(
-					"[desktop] Runtime dispose failed:",
-					err instanceof Error ? err.message : err,
-				);
+				console.warn("[desktop] Runtime dispose failed:", err instanceof Error ? err.message : err);
 			});
 			manager.removeAllListeners("crashed");
 			manager.removeAllListeners("error");
@@ -282,7 +267,6 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 		}
 		this.setUrl(null, /* owns */ false);
 	}
-
 
 	startAppNapPrevention(): void {
 		if (this.powerSaveBlockerId !== POWER_SAVE_BLOCKER_INACTIVE) return;
@@ -395,11 +379,8 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 			shutdownTimeoutMs: DEFAULT_CHILD_SHUTDOWN_TIMEOUT_MS,
 		});
 
-
 		manager.on("crashed", (exitCode, signal, stderrTail) => {
-			console.error(
-				`[desktop] Runtime crashed (code=${exitCode}, signal=${signal})`,
-			);
+			console.error(`[desktop] Runtime crashed (code=${exitCode}, signal=${signal})`);
 			if (stderrTail.trim().length > 0) {
 				console.error(`[desktop] Runtime stderr tail:\n${stderrTail}`);
 			}
@@ -439,8 +420,6 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 		this.emit("crashed");
 	}
 
-
-
 	private setUrl(url: string | null, ownsChild: boolean): void {
 		const urlChanged = url !== this.url;
 		if (url) {
@@ -461,7 +440,6 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 			this.emit("url-changed", url);
 		}
 
-
 		// Owned children emit "crashed" directly via process.exit; only
 		// attached runtimes need polling to detect crashes.
 		if (url && !ownsChild) {
@@ -473,13 +451,10 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 
 	private startAttachedProbe(origin: string): void {
 		this.stopAttachedProbe();
-		const intervalMs =
-			this.opts.attachedProbeIntervalMs ?? DEFAULT_ATTACHED_PROBE_INTERVAL_MS;
+		const intervalMs = this.opts.attachedProbeIntervalMs ?? DEFAULT_ATTACHED_PROBE_INTERVAL_MS;
 		if (intervalMs <= 0) return;
 
-		const threshold =
-			this.opts.attachedProbeFailureThreshold ??
-			DEFAULT_ATTACHED_PROBE_FAILURE_THRESHOLD;
+		const threshold = this.opts.attachedProbeFailureThreshold ?? DEFAULT_ATTACHED_PROBE_FAILURE_THRESHOLD;
 		this.attachedProbeFailures = 0;
 
 		// Capture the generation that's valid for this probe lifetime. Any
@@ -525,10 +500,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 			// log them locally — a rogue listener shouldn't take down the
 			// orchestrator's monitoring loop.
 			tick().catch((err) => {
-				console.warn(
-					"[desktop] Attached probe tick error:",
-					err instanceof Error ? err.message : err,
-				);
+				console.warn("[desktop] Attached probe tick error:", err instanceof Error ? err.message : err);
 			});
 		}, intervalMs);
 		this.attachedProbeTimer.unref();
@@ -547,8 +519,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 		this.stopRecoveryProbe();
 		const origin = this.lastKnownOrigin;
 		if (!origin) return;
-		const intervalMs =
-			this.opts.recoveryProbeIntervalMs ?? DEFAULT_RECOVERY_PROBE_INTERVAL_MS;
+		const intervalMs = this.opts.recoveryProbeIntervalMs ?? DEFAULT_RECOVERY_PROBE_INTERVAL_MS;
 		if (intervalMs <= 0) return;
 
 		// Capture the generation valid for this probe lifetime. Critical
@@ -574,9 +545,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 				if (gen !== this.recoveryProbeGen) return;
 				if (this.url !== null) return;
 				if (!healthy) return;
-				console.log(
-					`[desktop] Recovery probe found runtime at ${origin} — auto-attaching.`,
-				);
+				console.log(`[desktop] Recovery probe found runtime at ${origin} — auto-attaching.`);
 				this.setUrl(origin, /* owns */ false);
 			} finally {
 				this.recoveryProbeInFlight = false;
@@ -585,10 +554,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 
 		this.recoveryProbeTimer = setInterval(() => {
 			tick().catch((err) => {
-				console.warn(
-					"[desktop] Recovery probe tick error:",
-					err instanceof Error ? err.message : err,
-				);
+				console.warn("[desktop] Recovery probe tick error:", err instanceof Error ? err.message : err);
 			});
 		}, intervalMs);
 		this.recoveryProbeTimer.unref();

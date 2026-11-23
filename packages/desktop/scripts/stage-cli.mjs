@@ -31,9 +31,7 @@ if (!existsSync(cliEntry)) {
 	fail(`${cliEntry} is missing.`);
 }
 if (!existsSync(webUiIndex)) {
-	fail(
-		`${webUiIndex} is missing — the runtime is built but the web UI assets were not staged into dist/web-ui/.`,
-	);
+	fail(`${webUiIndex} is missing — the runtime is built but the web UI assets were not staged into dist/web-ui/.`);
 }
 
 rmSync(stageDir, { recursive: true, force: true });
@@ -47,9 +45,6 @@ cpSync(distDir, stageDir, { recursive: true });
 // `import` statement at module top. Drop a minimal package.json next to
 // the staged cli.js so Node treats it as ESM regardless of what lives
 // further up the tree.
-writeFileSync(
-	resolve(stageDir, "package.json"),
-	`${JSON.stringify({ type: "module" }, null, 2)}\n`,
-);
+writeFileSync(resolve(stageDir, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
 
 console.log(`[stage:cli] Staged ${distDir} → ${stageDir}`);

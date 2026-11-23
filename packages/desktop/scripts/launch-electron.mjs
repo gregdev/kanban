@@ -37,10 +37,7 @@ const child = spawn(electronPath, [resolve(desktopRoot, "dist", "main.js"), ...e
 // event and never calls the 'close' handler above, so the process would
 // exit 0 without a clue as to what went wrong.
 child.on("error", (err) => {
-	console.error(
-		`Failed to launch Electron at ${electronPath}:`,
-		err instanceof Error ? err.message : err,
-	);
+	console.error(`Failed to launch Electron at ${electronPath}:`, err instanceof Error ? err.message : err);
 	process.exit(1);
 });
 
@@ -87,10 +84,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
 			// ESRCH = child already gone; nothing to do. Anything else is
 			// surprising enough to log.
 			if (!err || err.code !== "ESRCH") {
-				console.error(
-					`Failed to forward ${sig} to Electron child:`,
-					err instanceof Error ? err.message : err,
-				);
+				console.error(`Failed to forward ${sig} to Electron child:`, err instanceof Error ? err.message : err);
 			}
 		}
 	});
