@@ -22,6 +22,7 @@ interface UsePersistentTerminalSessionInput {
 export interface UsePersistentTerminalSessionResult {
 	containerRef: MutableRefObject<HTMLDivElement | null>;
 	lastError: string | null;
+	isReconnecting: boolean;
 	isStopping: boolean;
 	clearTerminal: () => void;
 	stopTerminal: () => Promise<void>;
@@ -56,6 +57,7 @@ export function usePersistentTerminalSession({
 		sessionStartedAt: number | null;
 	} | null>(null);
 	const [lastError, setLastError] = useState<string | null>(null);
+	const [isReconnecting, setIsReconnecting] = useState(false);
 	const [isStopping, setIsStopping] = useState(false);
 	callbackRef.current = {
 		onSummary,
@@ -72,6 +74,7 @@ export function usePersistentTerminalSession({
 			terminalRef.current = null;
 			previousSessionRef.current = null;
 			setLastError(null);
+			setIsReconnecting(false);
 			setIsStopping(false);
 			return;
 		}
@@ -85,6 +88,7 @@ export function usePersistentTerminalSession({
 			terminalRef.current = null;
 			previousSessionRef.current = null;
 			setLastError("No project selected.");
+			setIsReconnecting(false);
 			return;
 		}
 		const container = containerRef.current;
@@ -119,6 +123,7 @@ export function usePersistentTerminalSession({
 				callbackRef.current.onConnectionReady?.(connectedTaskId);
 			},
 			onLastError: setLastError,
+			onReconnectingChange: setIsReconnecting,
 			onSummary: (summary) => {
 				callbackRef.current.onSummary?.(summary);
 			},
@@ -135,7 +140,6 @@ export function usePersistentTerminalSession({
 				isVisible,
 			},
 		);
-		setLastError(null);
 		setIsStopping(false);
 		return () => {
 			unsubscribe();
@@ -186,6 +190,7 @@ export function usePersistentTerminalSession({
 	return {
 		containerRef,
 		lastError,
+		isReconnecting,
 		isStopping,
 		clearTerminal,
 		stopTerminal,

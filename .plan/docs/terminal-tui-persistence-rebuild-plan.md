@@ -63,3 +63,7 @@ With that model:
 - closing one tab does not tear down the PTY or evict other viewers
 
 This is the invariant to preserve for future terminal work: `taskId` identifies the shared PTY, while `clientId` identifies one browser viewer of that PTY.
+
+### Client reconnect note
+
+The server's restore gate is per viewer, and it is only reset when the control socket connects. The IO socket is not enough: attaching a new IO socket while the viewer's `restoreComplete` flag is still true lets live output through before a fresh snapshot can land. `web-ui/src/terminal/persistent-terminal-manager.ts` therefore treats IO and control as one reconnect unit. Any abnormal close tears down both sockets for that viewer and reconnects them with capped exponential backoff, while intentional closes (`1000` replaced reasons and `1011` "Task session is not running.") stop retrying. Wake events (`online`, visible `visibilitychange`, and `pageshow`) reset the backoff and retry immediately.

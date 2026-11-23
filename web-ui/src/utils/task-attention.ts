@@ -28,7 +28,7 @@ export function isTaskAwaitingUserInput(summary: RuntimeTaskSessionSummary | nul
  * adapters that only report one.
  */
 export function getTaskUserAttentionPrompt(summary: RuntimeTaskSessionSummary | null | undefined): string | null {
-	if (!isTaskAwaitingUserInput(summary)) {
+	if (!summary || !isTaskAwaitingUserInput(summary)) {
 		return null;
 	}
 	const activity = summary.latestHookActivity;

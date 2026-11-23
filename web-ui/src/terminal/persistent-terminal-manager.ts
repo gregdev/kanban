@@ -25,6 +25,20 @@ const SHIFT_ENTER_SEQUENCE = "\n";
 const RESIZE_DEBOUNCE_MS = 50;
 const INTERRUPT_IDLE_SETTLE_MS = 250;
 const PARKING_ROOT_ID = "kb-persistent-terminal-parking-root";
+const RECONNECT_BASE_DELAY_MS = 500;
+const RECONNECT_MAX_DELAY_MS = 5_000;
+const RECONNECT_MAX_ATTEMPTS = 8;
+const TERMINAL_SOCKET_CLOSE_NORMAL = 1000;
+const TERMINAL_SOCKET_CLOSE_INTERNAL_ERROR = 1011;
+const TERMINAL_STREAM_CLOSED_ERROR = "Terminal stream closed. Close and reopen to reconnect.";
+const TERMINAL_CONTROL_CLOSED_ERROR = "Terminal control connection closed. Close and reopen to reconnect.";
+const TERMINAL_STREAM_FAILED_ERROR = "Terminal stream failed.";
+const TERMINAL_CONTROL_FAILED_ERROR = "Terminal control connection failed.";
+const REPLACED_TERMINAL_STREAM_CLOSE_REASON = "Replaced by newer terminal stream.";
+const REPLACED_TERMINAL_CONTROL_CLOSE_REASON = "Replaced by newer terminal control connection.";
+const TASK_SESSION_NOT_RUNNING_CLOSE_REASON = "Task session is not running.";
+
+type TerminalSocketChannel = "io" | "control";
 
 interface PersistentTerminalAppearance {
 	cursorColor: string;
@@ -35,6 +49,7 @@ interface PersistentTerminalAppearance {
 interface PersistentTerminalSubscriber {
 	onConnectionReady?: (taskId: string) => void;
 	onLastError?: (message: string | null) => void;
+	onReconnectingChange?: (isReconnecting: boolean) => void;
 	onSummary?: (summary: RuntimeTaskSessionSummary) => void;
 	onOutputText?: (text: string) => void;
 }
@@ -138,6 +153,18 @@ function buildKey(workspaceId: string, taskId: string): string {
 	return `${workspaceId}:${taskId}`;
 }
 
+function isIntentionalTerminalSocketClose(channel: TerminalSocketChannel, event: CloseEvent): boolean {
+	if (event.code === TERMINAL_SOCKET_CLOSE_INTERNAL_ERROR && event.reason === TASK_SESSION_NOT_RUNNING_CLOSE_REASON) {
+		return true;
+	}
+	if (event.code !== TERMINAL_SOCKET_CLOSE_NORMAL) {
+		return false;
+	}
+	const replacedReason =
+		channel === "io" ? REPLACED_TERMINAL_STREAM_CLOSE_REASON : REPLACED_TERMINAL_CONTROL_CLOSE_REASON;
+	return event.reason === replacedReason;
+}
+
 class PersistentTerminal {
 	private readonly terminal: Terminal;
 	private readonly fitAddon = new FitAddon();
@@ -162,6 +189,22 @@ class PersistentTerminal {
 	private outputTextDecoder = new TextDecoder();
 	private terminalWriteQueue: Promise<void> = Promise.resolve();
 	private disposed = false;
+	private reconnectTimer: number | null = null;
+	private reconnectAttempt = 0;
+	private reconnecting = false;
+	private ioSocketReconnectSuppressed = false;
+	private controlSocketReconnectSuppressed = false;
+	private readonly handleWindowOnline = (): void => {
+		this.retryImmediately();
+	};
+	private readonly handleWindowPageShow = (): void => {
+		this.retryImmediately();
+	};
+	private readonly handleDocumentVisibilityChange = (): void => {
+		if (document.visibilityState === "visible") {
+			this.retryImmediately();
+		}
+	};
 
 	constructor(
 		private readonly taskId: string,
@@ -230,6 +273,9 @@ class PersistentTerminal {
 			// Fall back to the default renderer when WebGL is unavailable.
 		}
 
+		window.addEventListener("online", this.handleWindowOnline);
+		window.addEventListener("pageshow", this.handleWindowPageShow);
+		document.addEventListener("visibilitychange", this.handleDocumentVisibilityChange);
 		this.ensureConnected();
 	}
 
@@ -237,6 +283,78 @@ class PersistentTerminal {
 		for (const subscriber of this.subscribers) {
 			subscriber.onLastError?.(this.lastError);
 		}
+	}
+
+	private setLastError(message: string | null): void {
+		if (this.lastError === message) {
+			return;
+		}
+		this.lastError = message;
+		this.notifyLastError();
+	}
+
+	private setReconnecting(reconnecting: boolean): void {
+		if (this.reconnecting === reconnecting) {
+			return;
+		}
+		this.reconnecting = reconnecting;
+		for (const subscriber of this.subscribers) {
+			subscriber.onReconnectingChange?.(reconnecting);
+		}
+	}
+
+	private clearReconnectTimer(): void {
+		if (this.reconnectTimer === null) {
+			return;
+		}
+		window.clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = null;
+	}
+
+	private scheduleReconnect(errorMessage: string): void {
+		if (this.disposed || this.reconnectTimer !== null) {
+			return;
+		}
+		if (this.ioSocketReconnectSuppressed || this.controlSocketReconnectSuppressed) {
+			this.failReconnect(errorMessage);
+			return;
+		}
+		if (this.reconnectAttempt >= RECONNECT_MAX_ATTEMPTS) {
+			this.failReconnect(errorMessage);
+			return;
+		}
+		this.setLastError(null);
+		this.setReconnecting(true);
+		const delay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt);
+		this.reconnectAttempt += 1;
+		this.reconnectTimer = window.setTimeout(() => {
+			this.reconnectTimer = null;
+			this.connectSockets();
+		}, delay);
+	}
+
+	private failReconnect(errorMessage: string): void {
+		this.clearReconnectTimer();
+		this.setReconnecting(false);
+		this.setLastError(errorMessage);
+	}
+
+	private retryImmediately(): void {
+		if (this.disposed) {
+			return;
+		}
+		this.reconnectAttempt = 0;
+		this.clearReconnectTimer();
+		this.ioSocketReconnectSuppressed = false;
+		this.controlSocketReconnectSuppressed = false;
+		const needsIo = this.ioSocket === null;
+		const needsControl = this.controlSocket === null;
+		if (!needsIo && !needsControl) {
+			return;
+		}
+		this.setLastError(null);
+		this.setReconnecting(true);
+		this.connectSockets();
 	}
 
 	private notifySummary(summary: RuntimeTaskSessionSummary): void {
@@ -254,6 +372,9 @@ class PersistentTerminal {
 
 	private notifyConnectionReady(): void {
 		this.connectionReady = true;
+		this.reconnectAttempt = 0;
+		this.setLastError(null);
+		this.setReconnecting(false);
 		for (const subscriber of this.subscribers) {
 			subscriber.onConnectionReady?.(this.taskId);
 		}
@@ -346,11 +467,77 @@ class PersistentTerminal {
 		});
 	}
 
-	private connectIo(): void {
-		if (this.ioSocket) {
+	private closeSocket(socket: WebSocket | null): void {
+		if (!socket) {
 			return;
 		}
-		const ioSocket = new WebSocket(getTerminalIoWebSocketUrl(this.taskId, this.workspaceId, this.clientId));
+		socket.onopen = null;
+		socket.onmessage = null;
+		socket.onerror = null;
+		socket.onclose = null;
+		try {
+			socket.close();
+		} catch {
+			// Ignore close errors from already-closed sockets.
+		}
+	}
+
+	private teardownSocketPairForReconnect(): void {
+		const ioSocket = this.ioSocket;
+		const controlSocket = this.controlSocket;
+		this.ioSocket = null;
+		this.controlSocket = null;
+		this.connectionReady = false;
+		this.restoreCompleted = false;
+		this.outputTextDecoder = new TextDecoder();
+		this.closeSocket(ioSocket);
+		this.closeSocket(controlSocket);
+	}
+
+	private handleSocketClose(channel: TerminalSocketChannel, event: CloseEvent): void {
+		const closedError = channel === "io" ? TERMINAL_STREAM_CLOSED_ERROR : TERMINAL_CONTROL_CLOSED_ERROR;
+		if (channel === "io") {
+			this.ioSocket = null;
+			this.outputTextDecoder = new TextDecoder();
+		} else {
+			this.controlSocket = null;
+		}
+		this.connectionReady = false;
+		this.restoreCompleted = false;
+
+		if (isIntentionalTerminalSocketClose(channel, event)) {
+			if (channel === "io") {
+				this.ioSocketReconnectSuppressed = true;
+			} else {
+				this.controlSocketReconnectSuppressed = true;
+			}
+			if (this.ioSocketReconnectSuppressed && this.controlSocketReconnectSuppressed) {
+				this.failReconnect(closedError);
+				return;
+			}
+			this.setReconnecting(false);
+			this.setLastError(closedError);
+			return;
+		}
+
+		// The server resets its per-viewer restore gate when the control socket
+		// reconnects. Reconnecting the pair together guarantees a fresh restore
+		// snapshot instead of a half-restored stream.
+		this.teardownSocketPairForReconnect();
+		this.scheduleReconnect(closedError);
+	}
+
+	private connectIo(): void {
+		if (this.disposed || this.ioSocket || this.ioSocketReconnectSuppressed) {
+			return;
+		}
+		let ioSocket: WebSocket;
+		try {
+			ioSocket = new WebSocket(getTerminalIoWebSocketUrl(this.taskId, this.workspaceId, this.clientId));
+		} catch {
+			this.scheduleReconnect(TERMINAL_STREAM_CLOSED_ERROR);
+			return;
+		}
 		ioSocket.binaryType = "arraybuffer";
 		ioSocket.addEventListener("message", (event) => {
 			if (this.disposed || this.ioSocket !== ioSocket) {
@@ -371,8 +558,7 @@ class PersistentTerminal {
 			if (this.disposed || this.ioSocket !== ioSocket) {
 				return;
 			}
-			this.lastError = null;
-			this.notifyLastError();
+			this.setLastError(null);
 			if (this.restoreCompleted && this.visibleContainer) {
 				this.requestResize();
 			}
@@ -384,31 +570,33 @@ class PersistentTerminal {
 			if (this.disposed || this.ioSocket !== ioSocket) {
 				return;
 			}
-			this.lastError = "Terminal stream failed.";
-			this.notifyLastError();
+			this.setLastError(TERMINAL_STREAM_FAILED_ERROR);
 		};
-		ioSocket.onclose = () => {
+		ioSocket.onclose = (event) => {
 			if (this.disposed || this.ioSocket !== ioSocket) {
 				return;
 			}
-			this.ioSocket = null;
-			this.outputTextDecoder = new TextDecoder();
-			this.connectionReady = false;
-			this.restoreCompleted = false;
-			this.lastError = "Terminal stream closed. Close and reopen to reconnect.";
-			this.notifyLastError();
+			this.handleSocketClose("io", event);
 		};
 	}
 
 	private connectControl(): void {
-		const controlSocket = new WebSocket(getTerminalControlWebSocketUrl(this.taskId, this.workspaceId, this.clientId));
+		if (this.disposed || this.controlSocket || this.controlSocketReconnectSuppressed) {
+			return;
+		}
+		let controlSocket: WebSocket;
+		try {
+			controlSocket = new WebSocket(getTerminalControlWebSocketUrl(this.taskId, this.workspaceId, this.clientId));
+		} catch {
+			this.scheduleReconnect(TERMINAL_CONTROL_CLOSED_ERROR);
+			return;
+		}
 		this.controlSocket = controlSocket;
 		controlSocket.onopen = () => {
 			if (this.disposed || this.controlSocket !== controlSocket) {
 				return;
 			}
-			this.lastError = null;
-			this.notifyLastError();
+			this.setLastError(null);
 		};
 		controlSocket.onmessage = (event) => {
 			let payload: RuntimeTerminalWsServerMessage;
@@ -428,10 +616,8 @@ class PersistentTerminal {
 						}
 						this.restoreCompleted = true;
 						this.sendControlMessage({ type: "restore_complete" });
-						if (this.ioSocket && this.visibleContainer) {
+						if (this.ioSocket?.readyState === WebSocket.OPEN) {
 							this.requestResize();
-						}
-						if (this.ioSocket) {
 							this.notifyConnectionReady();
 						}
 					})
@@ -439,8 +625,7 @@ class PersistentTerminal {
 						if (this.disposed || this.controlSocket !== controlSocket) {
 							return;
 						}
-						this.lastError = "Terminal restore failed.";
-						this.notifyLastError();
+						this.setLastError("Terminal restore failed.");
 					});
 				return;
 			}
@@ -454,8 +639,7 @@ class PersistentTerminal {
 				return;
 			}
 			if (payload.type === "error") {
-				this.lastError = payload.message;
-				this.notifyLastError();
+				this.setLastError(payload.message);
 				void this.enqueueTerminalWrite(`\r\n[kanban] ${payload.message}\r\n`);
 			}
 		};
@@ -463,29 +647,33 @@ class PersistentTerminal {
 			if (this.disposed || this.controlSocket !== controlSocket) {
 				return;
 			}
-			this.lastError = "Terminal control connection failed.";
-			this.notifyLastError();
+			this.setLastError(TERMINAL_CONTROL_FAILED_ERROR);
 		};
-		controlSocket.onclose = () => {
+		controlSocket.onclose = (event) => {
 			if (this.disposed || this.controlSocket !== controlSocket) {
 				return;
 			}
-			this.controlSocket = null;
-			this.lastError = "Terminal control connection closed. Close and reopen to reconnect.";
-			this.notifyLastError();
+			this.handleSocketClose("control", event);
 		};
 	}
 
-	private ensureConnected(): void {
+	private connectSockets(): void {
 		if (this.disposed) {
 			return;
 		}
-		if (!this.ioSocket) {
+		if (!this.ioSocket && !this.ioSocketReconnectSuppressed) {
 			this.connectIo();
 		}
-		if (!this.controlSocket) {
+		if (!this.controlSocket && !this.controlSocketReconnectSuppressed) {
 			this.connectControl();
 		}
+	}
+
+	private ensureConnected(): void {
+		if (this.disposed || this.reconnectTimer !== null) {
+			return;
+		}
+		this.connectSockets();
 	}
 
 	private updateAppearance(appearance: PersistentTerminalAppearance): void {
@@ -508,6 +696,7 @@ class PersistentTerminal {
 	subscribe(subscriber: PersistentTerminalSubscriber): () => void {
 		this.subscribers.add(subscriber);
 		subscriber.onLastError?.(this.lastError);
+		subscriber.onReconnectingChange?.(this.reconnecting);
 		if (this.latestSummary) {
 			subscriber.onSummary?.(this.latestSummary);
 		}
@@ -685,11 +874,18 @@ class PersistentTerminal {
 			return;
 		}
 		this.disposed = true;
+		window.removeEventListener("online", this.handleWindowOnline);
+		window.removeEventListener("pageshow", this.handleWindowPageShow);
+		document.removeEventListener("visibilitychange", this.handleDocumentVisibilityChange);
+		this.clearReconnectTimer();
+		this.setReconnecting(false);
 		this.unmount(this.visibleContainer);
-		this.ioSocket?.close();
-		this.controlSocket?.close();
+		const ioSocket = this.ioSocket;
+		const controlSocket = this.controlSocket;
 		this.ioSocket = null;
 		this.controlSocket = null;
+		this.closeSocket(ioSocket);
+		this.closeSocket(controlSocket);
 		this.subscribers.clear();
 		this.terminal.dispose();
 		this.hostElement.remove();
