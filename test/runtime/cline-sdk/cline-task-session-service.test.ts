@@ -969,6 +969,55 @@ describe("InMemoryClineTaskSessionService", () => {
 		);
 	});
 
+	it("marks a prompt queued behind a running turn as pending until the agent reads it", async () => {
+		const { service, runtime } = createTrackedService();
+
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Investigate startup",
+		});
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(1);
+		});
+
+		await service.sendTaskSessionInput("task-1", "One more thing");
+
+		const queuedMessage = service.listMessages("task-1").at(-1);
+		expect(queuedMessage?.role).toBe("user");
+		expect(queuedMessage?.content).toBe("One more thing");
+		expect(queuedMessage?.meta?.deliveryState).toBe("pending");
+
+		// A later prompt stays queued behind the first one, in FIFO order.
+		await service.sendTaskSessionInput("task-1", "And another");
+		expect(
+			service
+				.listMessages("task-1")
+				.filter((message) => message.role === "user" && message.meta?.deliveryState === "pending")
+				.map((message) => message.content),
+		).toEqual(["One more thing", "And another"]);
+	});
+
+	it("cancels queued prompts when the running turn is stopped, matching the SDK clearing its queue", async () => {
+		const { service, runtime } = createTrackedService();
+
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Investigate startup",
+		});
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(1);
+		});
+
+		await service.sendTaskSessionInput("task-1", "One more thing");
+		await service.cancelTaskTurn("task-1");
+
+		const queuedMessage = service.listMessages("task-1").at(-1);
+		expect(queuedMessage?.content).toBe("One more thing");
+		expect(queuedMessage?.meta?.deliveryState).toBe("canceled");
+	});
+
 	it("reuses the current task mode when follow-up input does not provide a mode override", async () => {
 		const { service, runtime } = createTrackedService();
 

@@ -12,6 +12,7 @@ import {
 	createAssistantMessage,
 	createMessage,
 	createReasoningMessage,
+	deliverNextQueuedUserMessage,
 	finishToolCallMessage,
 	isClineUserAttentionTool,
 	isCreditLimitError,
@@ -127,7 +128,20 @@ function readStatusEvent(event: unknown): ClineSdkStatusEvent | null {
 	}
 	return { type: "status", payload: payload as ClineSdkStatusEvent["payload"] };
 }
-
+// The SDK only reports a queued prompt as submitted once the previous turn has
+// finished and the queue drains. That is the signal that a "pending" user
+// message in the transcript has actually been read by the agent.
+function readPendingPromptSubmittedEvent(event: unknown): { sessionId: string; id: string } | null {
+	const record = asRecord(event);
+	if (!record || record.type !== "pending_prompt_submitted") {
+		return null;
+	}
+	const payload = asRecord(record.payload);
+	if (!payload || typeof payload.sessionId !== "string" || typeof payload.id !== "string") {
+		return null;
+	}
+	return { sessionId: payload.sessionId, id: payload.id };
+}
 function getRetainedClineToolActivity(entry: ClineTaskSessionEntry): {
 	toolName: string | null;
 	toolInputSummary: string | null;
@@ -235,6 +249,32 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 	const hookEvent = readHookEvent(event);
 	const endedEvent = readEndedEvent(event);
 	const statusEvent = readStatusEvent(event);
+
+	if (readPendingPromptSubmittedEvent(event)) {
+		const deliveredMessage = deliverNextQueuedUserMessage(entry);
+		if (deliveredMessage) {
+			input.emitMessage(taskId, deliveredMessage);
+			// The drained prompt starts a fresh turn immediately; without this the
+			// board would sit on the previous turn's `awaiting_review` until the
+			// first streamed token arrives.
+			emitSummary(input, {
+				state: "running",
+				reviewReason: null,
+				lastOutputAt: now(),
+				lastHookAt: now(),
+				latestHookActivity: {
+					activityText: "Agent active",
+					toolName: null,
+					toolInputSummary: null,
+					finalMessage: null,
+					hookEventName: "turn_start",
+					notificationType: null,
+					source: "cline-sdk",
+				},
+			});
+		}
+		return;
+	}
 
 	if (agentEvent?.type === "error") {
 		const errorMessage = "error" in agentEvent ? extractAgentErrorMessage(agentEvent.error) : null;

@@ -35,6 +35,7 @@ import {
 import {
 	type ClineTaskMessage,
 	type ClineTaskSessionEntry,
+	cancelQueuedUserMessages,
 	clearActiveTurnState,
 	cloneSummary,
 	createAssistantMessage,
@@ -558,6 +559,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		}
 		this.pendingTurnCancelTaskIds.delete(taskId);
 		await this.sessionRuntime.stopTaskSession(taskId).catch(() => null);
+		this.emitCanceledQueuedMessages(taskId, entry);
 		if (entry.summary.state === "idle") {
 			return cloneSummary(entry.summary);
 		}
@@ -578,6 +580,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		}
 		this.pendingTurnCancelTaskIds.delete(taskId);
 		await this.sessionRuntime.abortTaskSession(taskId).catch(() => null);
+		this.emitCanceledQueuedMessages(taskId, entry);
 		const summary = updateSummary(entry, {
 			state: "interrupted",
 			reviewReason: "interrupted",
@@ -599,6 +602,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		this.pendingTurnCancelTaskIds.add(taskId);
 		await this.sessionRuntime.abortTaskSession(taskId).catch(() => null);
 		clearActiveTurnState(entry);
+		this.emitCanceledQueuedMessages(taskId, entry);
 		const summary = updateSummary(entry, {
 			state: "idle",
 			reviewReason: null,
@@ -823,11 +827,17 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			}
 		}
 		{
+			// A prompt sent while a turn is already running is queued by the SDK and
+			// only handed to the agent when the current turn ends. Keep it visibly
+			// pending until `pending_prompt_submitted` arrives.
+			const queueDelivery = entry.summary.state === "running";
 			const message = createMessage(taskId, "user", normalized, images);
+			if (queueDelivery) {
+				message.meta = { ...message.meta, deliveryState: "pending" };
+			}
 			entry.messages.push(message);
 			this.emitMessage(taskId, message);
 			clearActiveTurnState(entry);
-			const queueDelivery = entry.summary.state === "running";
 			const waitingSummary = updateSummary(entry, {
 				state: "running",
 				mode: effectiveMode,
@@ -835,15 +845,20 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 				warningMessage: null,
 				lastOutputAt: now(),
 				lastHookAt: now(),
-				latestHookActivity: {
-					activityText: "Agent active",
-					toolName: null,
-					toolInputSummary: null,
-					finalMessage: null,
-					hookEventName: "turn_start",
-					notificationType: null,
-					source: "cline-sdk",
-				},
+				// Queueing must not erase what the running turn is currently doing.
+				...(queueDelivery
+					? {}
+					: {
+							latestHookActivity: {
+								activityText: "Agent active",
+								toolName: null,
+								toolInputSummary: null,
+								finalMessage: null,
+								hookEventName: "turn_start",
+								notificationType: null,
+								source: "cline-sdk" as const,
+							},
+						}),
 			});
 			this.emitSummary(waitingSummary);
 			const assistantCountBeforeSend = entry.messages.filter((message) => message.role === "assistant").length;
@@ -1081,6 +1096,15 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 
 	private emitMessage(taskId: string, message: ClineTaskMessage): void {
 		this.messageRepository.emitMessage(taskId, message);
+	}
+
+	// The SDK clears its pending prompt queue on stop/abort, so any prompt Kanban
+	// is still showing as queued will never be read. Mark it instead of leaving a
+	// message that looks delivered forever.
+	private emitCanceledQueuedMessages(taskId: string, entry: ClineTaskSessionEntry): void {
+		for (const message of cancelQueuedUserMessages(entry)) {
+			this.emitMessage(taskId, message);
+		}
 	}
 
 	private shouldCaptureReviewCheckpoint(

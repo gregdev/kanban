@@ -1061,6 +1061,9 @@ export const runtimeTaskChatMessageSchema = z.object({
 			messageKind: z.string().nullable().optional(),
 			displayRole: z.string().nullable().optional(),
 			reason: z.string().nullable().optional(),
+			// `pending` = queued behind the running turn, `canceled` = the turn was
+			// stopped before the agent read it. Absent once delivered.
+			deliveryState: z.enum(["pending", "canceled"]).nullable().optional(),
 		})
 		.nullable()
 		.optional(),

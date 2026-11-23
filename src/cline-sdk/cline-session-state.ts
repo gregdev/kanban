@@ -62,6 +62,12 @@ export interface ClineTaskMessage {
 		messageKind?: string | null;
 		displayRole?: string | null;
 		reason?: string | null;
+		/**
+		 * `pending` while a user prompt sits in the SDK's queue because a turn was
+		 * already running, `canceled` when that turn was stopped before the SDK
+		 * drained it. Absent once the prompt has been handed to the agent.
+		 */
+		deliveryState?: "pending" | "canceled" | null;
 	} | null;
 }
 
@@ -184,6 +190,37 @@ export function clearActiveTurnState(entry: ClineTaskSessionEntry): void {
 	entry.activeReasoningMessageId = null;
 	entry.toolMessageIdByToolCallId.clear();
 	entry.toolInputByToolCallId.clear();
+}
+
+function pendingUserMessages(entry: ClineTaskSessionEntry): ClineTaskMessage[] {
+	return entry.messages.filter((message) => message.role === "user" && message.meta?.deliveryState === "pending");
+}
+
+/**
+ * Marks the oldest queued prompt as handed to the agent.
+ *
+ * Queued prompts drain FIFO, and Kanban only ever enqueues with
+ * `delivery: "queue"`, so arrival order is the correlation key: the SDK prompt
+ * text can differ from the stored message (slash commands are expanded before
+ * send), and the SDK assigns its own pending id after Kanban has already
+ * created the message.
+ */
+export function deliverNextQueuedUserMessage(entry: ClineTaskSessionEntry): ClineTaskMessage | null {
+	const nextMessage = pendingUserMessages(entry)[0];
+	if (!nextMessage) {
+		return null;
+	}
+	nextMessage.meta = { ...nextMessage.meta, deliveryState: null };
+	return nextMessage;
+}
+
+/** Marks every still-queued prompt as canceled, matching the SDK clearing its queue on abort. */
+export function cancelQueuedUserMessages(entry: ClineTaskSessionEntry): ClineTaskMessage[] {
+	const queuedMessages = pendingUserMessages(entry);
+	for (const message of queuedMessages) {
+		message.meta = { ...message.meta, deliveryState: "canceled" };
+	}
+	return queuedMessages;
 }
 
 export function appendAssistantChunk(entry: ClineTaskSessionEntry, taskId: string, chunk: string): ClineTaskMessage {

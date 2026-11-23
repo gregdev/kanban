@@ -802,3 +802,75 @@ describe("applyClineSessionEvent", () => {
 		expect(result.entry.activeAssistantMessageId).toBeNull();
 	});
 });
+
+describe("applyClineSessionEvent pending prompts", () => {
+	function createQueuedEntry(): ClineTaskSessionEntry {
+		const entry = createEntry("task-1");
+		entry.summary.state = "awaiting_review";
+		entry.messages.push(
+			{
+				id: "queued-1",
+				role: "user",
+				content: "One more thing",
+				createdAt: 1,
+				meta: { deliveryState: "pending" },
+			},
+			{
+				id: "queued-2",
+				role: "user",
+				content: "And another",
+				createdAt: 2,
+				meta: { deliveryState: "pending" },
+			},
+		);
+		return entry;
+	}
+
+	it("delivers the oldest queued prompt when the SDK submits a pending prompt", () => {
+		const entry = createQueuedEntry();
+
+		const result = applyEvent({
+			entry,
+			event: {
+				type: "pending_prompt_submitted",
+				payload: {
+					sessionId: "session-1",
+					id: "pending_1",
+					prompt: "One more thing",
+					delivery: "queue",
+					attachmentCount: 0,
+				},
+			},
+		});
+
+		expect(result.messages).toHaveLength(1);
+		expect(result.messages[0]?.id).toBe("queued-1");
+		expect(result.messages[0]?.meta?.deliveryState).toBeNull();
+		expect(entry.messages[1]?.meta?.deliveryState).toBe("pending");
+		// Draining the queue starts the next turn, so the board must not stay in review.
+		expect(result.summaries.at(-1)?.state).toBe("running");
+		expect(result.summaries.at(-1)?.reviewReason).toBeNull();
+	});
+
+	it("ignores pending prompt submissions when nothing is queued", () => {
+		const entry = createEntry("task-1");
+		entry.summary.state = "awaiting_review";
+
+		const result = applyEvent({
+			entry,
+			event: {
+				type: "pending_prompt_submitted",
+				payload: {
+					sessionId: "session-1",
+					id: "pending_1",
+					prompt: "Stale",
+					delivery: "queue",
+					attachmentCount: 0,
+				},
+			},
+		});
+
+		expect(result.messages).toHaveLength(0);
+		expect(result.summaries).toHaveLength(0);
+	});
+});

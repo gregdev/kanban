@@ -189,9 +189,31 @@ export const ClineChatMessageItem = React.memo(function ClineChatMessageItem({
 	if (message.role === "user") {
 		const hasText = message.content.trim().length > 0;
 		const hasImages = Boolean(message.images && message.images.length > 0);
+		const deliveryState = message.meta?.deliveryState ?? null;
+		const isPending = deliveryState === "pending";
+		const isCanceled = deliveryState === "canceled";
 		return (
-			<div className="ml-auto max-w-[85%] rounded-md bg-accent/10 border border-accent/20 px-3 py-2 text-sm text-text-primary">
-				{hasText ? <div className="whitespace-pre-wrap break-words">{message.content}</div> : null}
+			<div
+				className={cn(
+					"ml-auto max-w-[85%] rounded-md border px-3 py-2 text-sm text-text-primary transition-opacity duration-300",
+					isPending && "border-border bg-surface-3/50 opacity-50",
+					isCanceled && "border-border bg-surface-2 opacity-60",
+					!isPending && !isCanceled && "border-accent/20 bg-accent/10",
+				)}
+			>
+				{isPending ? (
+					<div className="mb-1 text-xs text-text-tertiary">
+						Queued · the agent reads this when the current turn finishes
+					</div>
+				) : null}
+				{isCanceled ? (
+					<div className="mb-1 text-xs text-text-tertiary">Not sent · stopped before the agent read this</div>
+				) : null}
+				{hasText ? (
+					<div className={cn("whitespace-pre-wrap wrap-break-word", isCanceled && "line-through decoration-1")}>
+						{message.content}
+					</div>
+				) : null}
 				{hasImages ? (
 					<TaskImageStrip images={message.images ?? []} className={hasText ? "mt-2" : undefined} />
 				) : null}

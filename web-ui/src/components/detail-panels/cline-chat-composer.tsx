@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowBigUp, Command, Pause, SendHorizontal } from "lucide-react";
+import { AlertTriangle, ArrowBigUp, Command, SendHorizontal, Square } from "lucide-react";
 import {
 	type ClipboardEvent,
 	type DragEvent,
@@ -561,23 +561,38 @@ export function ClineChatComposer({
 							</div>
 						</Tooltip>
 					) : null}
-					<Button
-						variant="default"
-						size="sm"
-						className="h-7 w-7 rounded-full border-border-bright bg-surface-4 p-0 text-text-primary hover:bg-surface-3"
-						aria-label={canCancel ? "Cancel request" : "Send message"}
-						disabled={canCancel ? false : !canSubmit}
-						onClick={() => {
-							if (canCancel) {
-								onCancel();
-								return;
-							}
-							void onSend();
-						}}
-						icon={
-							isSending ? <Spinner size={12} /> : canCancel ? <Pause size={14} /> : <SendHorizontal size={14} />
+					{canCancel ? (
+						<Tooltip side="top" content={<span className="whitespace-nowrap">Stop the agent (Esc)</span>}>
+							<Button
+								variant="danger"
+								size="sm"
+								className="h-7 w-7 rounded-full p-0"
+								aria-label="Stop agent"
+								onClick={onCancel}
+								icon={<Square size={12} fill="currentColor" />}
+							/>
+						</Tooltip>
+					) : null}
+					<Tooltip
+						side="top"
+						content={
+							<span className="whitespace-nowrap">
+								{canCancel ? "Queue message — read after this turn" : "Send message"}
+							</span>
 						}
-					/>
+					>
+						<Button
+							variant="default"
+							size="sm"
+							className="h-7 w-7 rounded-full border-border-bright bg-surface-4 p-0 text-text-primary hover:bg-surface-3"
+							aria-label={canCancel ? "Queue message" : "Send message"}
+							disabled={!canSubmit}
+							onClick={() => {
+								void onSend();
+							}}
+							icon={isSending ? <Spinner size={12} /> : <SendHorizontal size={14} />}
+						/>
+					</Tooltip>
 				</div>
 			</div>
 			{warningMessage ? (

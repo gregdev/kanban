@@ -457,7 +457,9 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 							onDraftChange={setDraft}
 							images={draftImages}
 							onImagesChange={setDraftImages}
-							placeholder={composerPlaceholder}
+							placeholder={
+								canCancel ? "Queue a message — the agent reads it when this turn finishes" : composerPlaceholder
+							}
 							mode={mode}
 							onModeChange={handleModeChange}
 							showModeToggle={showComposerModeToggle}

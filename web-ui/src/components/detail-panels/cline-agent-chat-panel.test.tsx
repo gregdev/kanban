@@ -488,6 +488,60 @@ describe("ClineAgentChatPanel", () => {
 		expect(image).toBeInstanceOf(HTMLImageElement);
 	});
 
+	it("marks a queued prompt as pending until the agent reads it", async () => {
+		const assistantMessage: ClineChatMessage = {
+			id: "assistant-1",
+			role: "assistant",
+			content: "Working on it",
+			createdAt: 1,
+		};
+		const queuedMessage: ClineChatMessage = {
+			id: "user-1",
+			role: "user",
+			content: "Also update the changelog",
+			createdAt: 2,
+			meta: { deliveryState: "pending" },
+		};
+		const deliveredMessage: ClineChatMessage = {
+			id: "user-1",
+			role: "user",
+			content: "Also update the changelog",
+			createdAt: 2,
+			meta: { deliveryState: null },
+		};
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("running")}
+					onLoadMessages={async () => [assistantMessage, queuedMessage]}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		expect(container.textContent).toContain("Also update the changelog");
+		expect(container.textContent).toContain("Queued · the agent reads this when the current turn finishes");
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("running")}
+					onLoadMessages={async () => [assistantMessage]}
+					incomingMessage={deliveredMessage}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		expect(container.textContent).toContain("Also update the changelog");
+		expect(container.textContent).not.toContain("Queued · the agent reads this");
+	});
+
 	it("renders newly streamed messages as they arrive", async () => {
 		const initialMessages: ClineChatMessage[] = [
 			{
@@ -749,12 +803,20 @@ describe("ClineAgentChatPanel", () => {
 		expect(document.activeElement).toBe(textarea);
 		expect(textarea.getAttribute("rows")).toBe("1");
 		expect(container.textContent).toContain("Select model");
-		const sendButton = container.querySelector('button[aria-label="Cancel request"]');
+		// A running turn gets its own Stop button so sending a queued prompt stays possible.
+		const stopButton = container.querySelector('button[aria-label="Stop agent"]');
+		expect(stopButton).toBeInstanceOf(HTMLButtonElement);
+		if (!(stopButton instanceof HTMLButtonElement)) {
+			throw new Error("Expected composer stop button");
+		}
+		expect(stopButton.disabled).toBe(false);
+		const sendButton = container.querySelector('button[aria-label="Queue message"]');
 		expect(sendButton).toBeInstanceOf(HTMLButtonElement);
 		if (!(sendButton instanceof HTMLButtonElement)) {
-			throw new Error("Expected composer action button");
+			throw new Error("Expected composer queue button");
 		}
-		expect(sendButton.disabled).toBe(false);
+		expect(sendButton.disabled).toBe(true);
+		expect(textarea.getAttribute("placeholder")).toContain("Queue a message");
 
 		Object.defineProperty(textarea, "scrollHeight", {
 			configurable: true,
