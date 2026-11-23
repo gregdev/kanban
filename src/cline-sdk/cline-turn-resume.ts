@@ -6,6 +6,7 @@
 // retryability rules in one place so the session service stays focused on
 // orchestration.
 import type { RuntimeTaskSessionSummary } from "../core/api-contract";
+import { ClineSessionConfigUnavailableError } from "./cline-session-errors";
 import { isCreditLimitError } from "./cline-session-state";
 
 /**
@@ -106,6 +107,7 @@ const MISSING_LIVE_SESSION_PATTERNS = [
 	"session not found",
 	"no active cline session",
 	"no resumable cline session",
+	"no previous cline session config",
 	"unknown session",
 ] as const;
 
@@ -114,8 +116,15 @@ const MISSING_LIVE_SESSION_PATTERNS = [
  * SDK runtime no longer holds a live session for it (for example after the
  * runtime host restarted). The service can rebuild a live session from
  * repaired persisted history in that case.
+ *
+ * `ClineSessionConfigUnavailableError` is matched structurally; the string
+ * patterns remain as a fallback for errors that cross an SDK/process boundary
+ * and lose their class identity.
  */
 export function isMissingLiveClineSessionError(error: unknown): boolean {
+	if (error instanceof ClineSessionConfigUnavailableError) {
+		return true;
+	}
 	if (!(error instanceof Error)) {
 		return false;
 	}

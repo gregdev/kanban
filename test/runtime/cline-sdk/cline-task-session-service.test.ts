@@ -1,6 +1,8 @@
 import type { ToolApprovalRequest, ToolApprovalResult } from "@clinebot/core";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { ClineRuntimeSetup } from "../../../src/cline-sdk/cline-runtime-setup";
+import { ClineSessionConfigUnavailableError } from "../../../src/cline-sdk/cline-session-errors";
+import { readPersistedClineStartConfig } from "../../../src/cline-sdk/cline-session-launch-config";
 import type {
 	ClinePersistedTaskSessionSnapshot,
 	ClineSessionRuntime,
@@ -8,10 +10,16 @@ import type {
 	StartClineSessionRuntimeRequest,
 	StartClineSessionRuntimeResult,
 } from "../../../src/cline-sdk/cline-session-runtime";
+import { createInMemoryClineSessionRuntime } from "../../../src/cline-sdk/cline-session-runtime";
 import { createSessionId } from "../../../src/cline-sdk/cline-session-state";
 import type { ClineTaskSessionService } from "../../../src/cline-sdk/cline-task-session-service";
 import { createInMemoryClineTaskSessionService } from "../../../src/cline-sdk/cline-task-session-service";
 import { createClineWatcherRegistry } from "../../../src/cline-sdk/cline-watcher-registry";
+import type {
+	ClineSdkPersistedMessage,
+	ClineSdkSessionRecord,
+	ClineSdkStartSessionInput,
+} from "../../../src/cline-sdk/sdk-runtime-boundary";
 import type { RuntimeTaskImage, RuntimeTaskSessionMode } from "../../../src/core/api-contract";
 
 const originalArgv = [...process.argv];
@@ -77,6 +85,8 @@ interface FakeClineSessionRuntimeController {
 	createRuntime(options: CreateInMemoryClineSessionRuntimeOptions): ClineSessionRuntime;
 	getTaskSessionId(taskId: string): string | null;
 	bindTaskSession(taskId: string, sessionId: string): void;
+	/** Simulates losing the in-memory start config on a runtime restart. */
+	clearStartConfig(taskId: string): void;
 	emitAgentEvent(sessionId: string, event: unknown): void;
 	emitChunk(sessionId: string, chunk: string, stream?: string): void;
 }
@@ -175,15 +185,32 @@ function createFakeClineSessionRuntime(): FakeClineSessionRuntimeController {
 			},
 			async restartTaskSession(input): Promise<StartClineSessionRuntimeResult> {
 				const lastStartRequest = lastStartRequestByTaskId.get(input.taskId);
-				if (!lastStartRequest) {
-					throw new Error(`No previous Cline session config is available for task ${input.taskId}.`);
+				if (lastStartRequest) {
+					return await this.startTaskSession({
+						...lastStartRequest,
+						prompt: input.prompt,
+						initialMessages: input.initialMessages,
+						images: input.images,
+						mode: input.mode ?? lastStartRequest.mode,
+					});
 				}
+				// Mirror the real runtime: rebuild from the persisted session and its
+				// secret-free start config when the in-memory request is gone.
+				const snapshot = await readPersistedTaskSessionMock(input.taskId);
+				if (!snapshot) {
+					throw new ClineSessionConfigUnavailableError(input.taskId);
+				}
+				const persistedStartConfig = readPersistedClineStartConfig(snapshot.record);
 				return await this.startTaskSession({
-					...lastStartRequest,
+					taskId: input.taskId,
+					cwd: snapshot.record.cwd,
 					prompt: input.prompt,
-					initialMessages: input.initialMessages,
+					initialMessages: input.initialMessages ?? snapshot.messages,
 					images: input.images,
-					mode: input.mode ?? lastStartRequest.mode,
+					providerId: persistedStartConfig?.providerId ?? snapshot.record.provider,
+					modelId: persistedStartConfig?.modelId ?? snapshot.record.model,
+					mode: input.mode ?? persistedStartConfig?.mode ?? "act",
+					systemPrompt: "Persisted Cline session system prompt",
 				});
 			},
 			async sendTaskSessionInput(
@@ -240,8 +267,11 @@ function createFakeClineSessionRuntime(): FakeClineSessionRuntimeController {
 			getTaskProviderId(taskId: string): string | null {
 				return lastStartRequestByTaskId.get(taskId)?.providerId ?? null;
 			},
-			canRestartTaskSession(taskId: string): boolean {
-				return lastStartRequestByTaskId.has(taskId);
+			async canRestartTaskSession(taskId: string): Promise<boolean> {
+				if (lastStartRequestByTaskId.has(taskId)) {
+					return true;
+				}
+				return (await readPersistedTaskSessionMock(taskId)) !== null;
 			},
 			async readPersistedTaskSession(taskId: string): Promise<ClinePersistedTaskSessionSnapshot | null> {
 				return await readPersistedTaskSessionMock(taskId);
@@ -307,6 +337,9 @@ function createFakeClineSessionRuntime(): FakeClineSessionRuntimeController {
 			return sessionIdByTaskId.get(taskId) ?? null;
 		},
 		bindTaskSession,
+		clearStartConfig(taskId: string): void {
+			lastStartRequestByTaskId.delete(taskId);
+		},
 		emitAgentEvent,
 		emitChunk,
 	};
@@ -351,6 +384,92 @@ function createFakeRuntimeSetup(): FakeRuntimeSetupController {
 		loadRulesMock,
 		requestToolApprovalMock,
 		disposeMock,
+	};
+}
+
+function createNoopServiceMcpRuntimeService() {
+	return {
+		createToolBundle: vi.fn(async () => ({
+			tools: [],
+			warnings: [],
+			dispose: async () => {},
+		})),
+		getAuthStatuses: vi.fn(async () => []),
+		authorizeServer: vi.fn(),
+	};
+}
+
+interface FakePersistedSessionStore {
+	records: Map<string, ClineSdkSessionRecord>;
+	messages: Map<string, ClineSdkPersistedMessage[]>;
+}
+
+// Stateful stand-in for the SDK session store. It deliberately survives host
+// disposal so a test can simulate the runtime process restarting.
+function createPersistedSessionHost(store: FakePersistedSessionStore) {
+	let sessionCounter = 0;
+	const touchRecord = (sessionId: string) => {
+		const record = store.records.get(sessionId);
+		if (record) {
+			store.records.set(sessionId, { ...record, updatedAt: new Date().toISOString() });
+		}
+	};
+
+	return {
+		start: vi.fn(async (input: ClineSdkStartSessionInput) => {
+			const sessionId = input.config.sessionId?.trim() || `fake-session-${++sessionCounter}`;
+			const startedAt = new Date().toISOString();
+			store.records.set(sessionId, {
+				sessionId,
+				source: "core" as ClineSdkSessionRecord["source"],
+				status: "running",
+				startedAt,
+				updatedAt: startedAt,
+				interactive: true,
+				provider: input.config.providerId,
+				model: input.config.modelId,
+				cwd: input.config.cwd,
+				workspaceRoot: input.config.cwd,
+				enableTools: true,
+				enableSpawn: false,
+				enableTeams: false,
+				isSubagent: false,
+			});
+			store.messages.set(sessionId, [...(input.initialMessages ?? [])]);
+			return { sessionId, result: {} };
+		}),
+		send: vi.fn(async (input: { sessionId: string; prompt: string }) => {
+			const messages = store.messages.get(input.sessionId) ?? [];
+			messages.push({ role: "user", content: input.prompt });
+			store.messages.set(input.sessionId, messages);
+			touchRecord(input.sessionId);
+			return { text: "done" };
+		}),
+		stop: vi.fn(async () => {}),
+		abort: vi.fn(async () => {}),
+		delete: vi.fn(async (sessionId: string) => store.records.delete(sessionId)),
+		dispose: vi.fn(async () => {}),
+		get: vi.fn(async (sessionId: string) => store.records.get(sessionId)),
+		list: vi.fn(async () => [...store.records.values()]),
+		update: vi.fn(
+			async (
+				sessionId: string,
+				updates: { prompt?: string | null; title?: string | null; metadata?: Record<string, unknown> | null },
+			) => {
+				const record = store.records.get(sessionId);
+				if (!record) {
+					return { updated: false };
+				}
+				const metadata = updates.metadata !== undefined ? { ...updates.metadata } : { ...record.metadata };
+				if (updates.title) {
+					metadata.title = updates.title;
+				}
+				store.records.set(sessionId, { ...record, metadata, updatedAt: new Date().toISOString() });
+				return { updated: true };
+			},
+		),
+		readMessages: vi.fn(async (sessionId: string) => store.messages.get(sessionId) ?? []),
+		subscribe: vi.fn(() => () => {}),
 	};
 }
 
@@ -1903,7 +2022,7 @@ describe("InMemoryClineTaskSessionService", () => {
 		expect(runtime.sendTaskSessionInputMock).not.toHaveBeenCalled();
 	});
 
-	it("returns null for restored home sessions without cached start config so the caller can start fresh", async () => {
+	it("restarts a restored home session from its persisted record instead of dropping the message", async () => {
 		const { service, runtime } = createTrackedService();
 		const taskId = "__home_agent__:workspace-1:cline";
 		runtime.readPersistedTaskSessionMock.mockResolvedValue({
@@ -1939,14 +2058,242 @@ describe("InMemoryClineTaskSessionService", () => {
 		expect(reboundSummary?.taskId).toBe(taskId);
 		expect(runtime.startTaskSessionMock).not.toHaveBeenCalled();
 
+		// A persisted session is resumable even though the runtime lost the
+		// in-memory start config, so the message must not be dropped.
 		const sendSummary = await service.sendTaskSessionInput(taskId, "Continue");
-		expect(sendSummary).toBeNull();
-		expect(runtime.startTaskSessionMock).not.toHaveBeenCalled();
-		expect(service.listMessages(taskId).map((message) => message.content)).not.toContain("Continue");
+		expect(sendSummary?.taskId).toBe(taskId);
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(1);
+		});
+		expect(runtime.startTaskSessionMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				taskId,
+				cwd: "/tmp/worktree",
+				providerId: "openrouter",
+				modelId: "openrouter/auto",
+				prompt: "resolved:Continue",
+				initialMessages: [
+					{ role: "user", content: "Initial prompt" },
+					{ role: "assistant", content: "Initial reply" },
+				],
+			}),
+		);
+		expect(service.listMessages(taskId).map((message) => message.content)).toContain("Continue");
 
 		const reloadSummary = await service.reloadTaskSession(taskId);
-		expect(reloadSummary).toBeNull();
-		expect(runtime.startTaskSessionMock).not.toHaveBeenCalled();
+		expect(reloadSummary?.state).toBe("idle");
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	it("restarts the persisted session after the runtime is disposed without duplicating the user message", async () => {
+		const store: FakePersistedSessionStore = { records: new Map(), messages: new Map() };
+		const host = createPersistedSessionHost(store);
+		const runtimeSetup = createFakeRuntimeSetup();
+		const resolveLaunchConfig = vi.fn(
+			async (overrides?: { providerIdOverride?: string; modelIdOverride?: string }) => ({
+				providerId: overrides?.providerIdOverride ?? "anthropic",
+				modelId: overrides?.modelIdOverride ?? "claude-sonnet-4-6",
+				apiKey: "sk-test",
+				baseUrl: null,
+				reasoningEffort: null,
+			}),
+		);
+		const createService = () =>
+			createInMemoryClineTaskSessionService({
+				createProviderConfigResolver: () => ({ resolveLaunchConfig }),
+				createRuntimeSetup: vi.fn(async (_workspacePath: string) => runtimeSetup.setup),
+				createSessionRuntime: (options) =>
+					createInMemoryClineSessionRuntime({
+						...options,
+						createSessionHost: async () => host,
+						createMcpRuntimeService: createNoopServiceMcpRuntimeService,
+					}),
+			});
+
+		const serviceA = createService();
+		services.push(serviceA);
+		await serviceA.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Initial prompt",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+		});
+		await vi.waitFor(() => {
+			expect(host.start).toHaveBeenCalledTimes(1);
+			expect(host.send).toHaveBeenCalledTimes(1);
+			expect([...store.records.values()].some((record) => readPersistedClineStartConfig(record))).toBe(true);
+		});
+		expect(
+			[...store.records.values()].map((record) => readPersistedClineStartConfig(record)).filter(Boolean),
+		).toContainEqual(
+			expect.objectContaining({
+				taskId: "task-1",
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-6",
+				mode: "act",
+			}),
+		);
+
+		// Simulate a runtime restart: the live runtime is disposed, the SDK
+		// session store survives.
+		await serviceA.dispose();
+
+		const serviceB = createService();
+		services.push(serviceB);
+		const reboundSummary = await serviceB.rebindPersistedTaskSession("task-1");
+		expect(reboundSummary?.state).toBe("awaiting_review");
+
+		const summary = await serviceB.sendTaskSessionInput("task-1", "Commit this task");
+		expect(summary?.state).toBe("running");
+
+		await vi.waitFor(() => {
+			expect(host.start).toHaveBeenCalledTimes(2);
+		});
+		const restartStart = host.start.mock.calls[1]?.[0];
+		expect(restartStart?.config.cwd).toBe("/tmp/worktree");
+		expect(restartStart?.config.providerId).toBe("anthropic");
+		expect(restartStart?.config.modelId).toBe("claude-sonnet-4-6");
+		expect(restartStart?.initialMessages).toEqual([{ role: "user", content: "resolved:Initial prompt" }]);
+		expect(host.send).toHaveBeenLastCalledWith(expect.objectContaining({ prompt: "resolved:Commit this task" }));
+
+		const transcriptUserMessages = serviceB
+			.listMessages("task-1")
+			.filter((message) => message.role === "user")
+			.map((message) => message.content);
+		expect(transcriptUserMessages).toEqual(["resolved:Initial prompt", "Commit this task"]);
+		expect(serviceB.listMessages("task-1").some((message) => message.content.includes("Cline SDK send failed"))).toBe(
+			false,
+		);
+	});
+
+	it("surfaces an actionable config error instead of a generic SDK failure when the restart config is unavailable", async () => {
+		const store: FakePersistedSessionStore = { records: new Map(), messages: new Map() };
+		const host = createPersistedSessionHost(store);
+		const runtimeSetup = createFakeRuntimeSetup();
+		const providerError =
+			"No native Cline provider is configured. Open Settings, choose a provider, and then start the task again.";
+		let providerConfigured = true;
+		const createService = () =>
+			createInMemoryClineTaskSessionService({
+				createProviderConfigResolver: () => ({
+					resolveLaunchConfig: vi.fn(
+						async (overrides?: { providerIdOverride?: string; modelIdOverride?: string }) => {
+							if (!providerConfigured) {
+								throw new Error(providerError);
+							}
+							return {
+								providerId: overrides?.providerIdOverride ?? "anthropic",
+								modelId: overrides?.modelIdOverride ?? "claude-sonnet-4-6",
+								apiKey: "sk-test",
+								baseUrl: null,
+								reasoningEffort: null,
+							};
+						},
+					),
+				}),
+				createRuntimeSetup: vi.fn(async (_workspacePath: string) => runtimeSetup.setup),
+				createSessionRuntime: (options) =>
+					createInMemoryClineSessionRuntime({
+						...options,
+						createSessionHost: async () => host,
+						createMcpRuntimeService: createNoopServiceMcpRuntimeService,
+					}),
+			});
+
+		const serviceA = createService();
+		services.push(serviceA);
+		await serviceA.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Initial prompt",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+		});
+		await vi.waitFor(() => {
+			expect(host.send).toHaveBeenCalledTimes(1);
+		});
+		await serviceA.dispose();
+
+		providerConfigured = false;
+		const serviceB = createService();
+		services.push(serviceB);
+		await serviceB.rebindPersistedTaskSession("task-1");
+
+		await serviceB.sendTaskSessionInput("task-1", "Commit this task");
+
+		await vi.waitFor(() => {
+			const systemMessages = serviceB.listMessages("task-1").filter((message) => message.role === "system");
+			expect(systemMessages.some((message) => message.content.includes(providerError))).toBe(true);
+		});
+		const configErrorMessage = serviceB
+			.listMessages("task-1")
+			.find((message) => message.role === "system" && message.content.includes(providerError));
+		expect(configErrorMessage?.content).toContain("Restart the task");
+		expect(configErrorMessage?.content).not.toContain("Cline SDK send failed");
+		expect(configErrorMessage?.content).not.toContain("You can send another message");
+		expect(serviceB.getSummary("task-1")?.state).toBe("awaiting_review");
+		expect(serviceB.getSummary("task-1")?.reviewReason).toBe("error");
+	});
+
+	it("treats a missing launch config as a missing live session and rebuilds from persisted history", async () => {
+		const { service, runtime } = createTrackedService();
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Initial prompt",
+		});
+		const sessionId = await waitForTaskSessionId(runtime, "task-1");
+		runtime.emitAgentEvent(sessionId, {
+			type: "run-failed",
+			error: new Error("runtime host crashed"),
+		});
+		await vi.waitFor(() => {
+			expect(service.getSummary("task-1")?.state).toBe("awaiting_review");
+		});
+		runtime.readPersistedTaskSessionMock.mockResolvedValue({
+			record: {
+				sessionId: "task-1-persisted",
+				source: "core" as ClinePersistedTaskSessionSnapshot["record"]["source"],
+				status: "failed",
+				startedAt: "2026-03-17T10:00:00.000Z",
+				updatedAt: "2026-03-17T10:05:00.000Z",
+				interactive: true,
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				cwd: "/tmp/worktree",
+				workspaceRoot: "/tmp/workspace-root",
+				enableTools: true,
+				enableSpawn: false,
+				enableTeams: false,
+				isSubagent: false,
+			},
+			messages: [
+				{ role: "user", content: "Initial prompt" },
+				{ role: "assistant", content: "Partial answer" },
+			],
+		});
+		runtime.resumeTaskTurnMock.mockRejectedValueOnce(new ClineSessionConfigUnavailableError("task-1"));
+
+		const result = await service.resumeTaskTurn("task-1");
+
+		expect(result.outcome).toBe("resumed");
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(2);
+		});
+		expect(runtime.startTaskSessionMock).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				initialMessages: [
+					{ role: "user", content: "Initial prompt" },
+					{ role: "assistant", content: "Partial answer" },
+				],
+			}),
+		);
+		expect(
+			service.listMessages("task-1").some((message) => message.content.includes("Cline SDK resume failed")),
+		).toBe(false);
 	});
 
 	it("does not duplicate assistant output when stream and send result both include final text", async () => {

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ClineSessionConfigUnavailableError } from "../../../src/cline-sdk/cline-session-errors";
+import { KANBAN_CLINE_START_CONFIG_METADATA_KEY } from "../../../src/cline-sdk/cline-session-launch-config";
 import { createInMemoryClineSessionRuntime } from "../../../src/cline-sdk/cline-session-runtime";
 import type {
 	AgentHooks,
@@ -289,9 +291,12 @@ describe("InMemoryClineSessionRuntime", () => {
 		});
 
 		expect(result.sessionId).toBeTruthy();
-		expect(update).toHaveBeenCalledWith(result.sessionId, {
-			title: "Readable task title",
-		});
+		expect(update).toHaveBeenCalledWith(
+			result.sessionId,
+			expect.objectContaining({
+				title: "Readable task title",
+			}),
+		);
 	});
 
 	it("ignores session metadata update failures during start", async () => {
@@ -1111,5 +1116,203 @@ describe("InMemoryClineSessionRuntime", () => {
 		expect(typeof startInput?.localRuntime?.hooks?.beforeModel).toBe("function");
 
 		await runtime.dispose();
+	});
+
+	it("persists a secret-free start config in session metadata", async () => {
+		const update = vi.fn(
+			async (
+				_sessionId: string,
+				_updates: { prompt?: string | null; title?: string | null; metadata?: Record<string, unknown> | null },
+			) => ({ updated: true }),
+		);
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			update,
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await runtime.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Investigate startup",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			mode: "plan",
+			apiKey: "sk-should-not-be-persisted",
+			baseUrl: "https://api.example.test",
+			reasoningEffort: "high",
+			agentCommandTimeoutSec: 45,
+			systemPrompt: "You are a helpful coding assistant.",
+		});
+
+		const updateInput = update.mock.calls[0]?.[1] as { metadata?: Record<string, unknown> } | undefined;
+		expect(updateInput?.metadata?.[KANBAN_CLINE_START_CONFIG_METADATA_KEY]).toMatchObject({
+			taskId: "task-1",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			mode: "plan",
+			baseUrl: "https://api.example.test",
+			reasoningEffort: "high",
+			agentCommandTimeoutSec: 45,
+		});
+		expect(JSON.stringify(updateInput)).not.toContain("sk-should-not-be-persisted");
+	});
+
+	it("restarts from the persisted session after the runtime is disposed", async () => {
+		const persistedRecord: ClineSdkSessionRecord = {
+			...createPersistedRecord({
+				sessionId: "task-1-persisted",
+				status: "completed",
+				startedAt: "2026-03-17T10:00:00.000Z",
+				updatedAt: "2026-03-17T10:05:00.000Z",
+			}),
+			metadata: {
+				[KANBAN_CLINE_START_CONFIG_METADATA_KEY]: {
+					taskId: "task-1",
+					providerId: "anthropic",
+					modelId: "claude-sonnet-4-6",
+					mode: "plan",
+					baseUrl: "https://api.example.test",
+					reasoningEffort: "high",
+					updatedAt: "2026-03-17T10:05:00.000Z",
+				},
+			},
+		};
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-new",
+				result: {},
+			})),
+			send: vi.fn(async () => ({ text: "continued" })),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => persistedRecord),
+			list: vi.fn(async () => [persistedRecord]),
+			readMessages: vi.fn(async () => [{ role: "user" as const, content: "Initial prompt" }]),
+			subscribe: vi.fn(() => () => {}),
+		};
+		const resolveRestartLaunchConfig = vi.fn(async () => ({
+			apiKey: "sk-current",
+			systemPrompt: "Rebuilt system prompt",
+		}));
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+			resolveRestartLaunchConfig,
+		});
+
+		await runtime.dispose();
+
+		expect(await runtime.canRestartTaskSession("task-1")).toBe(true);
+
+		const result = await runtime.restartTaskSession({
+			taskId: "task-1",
+			prompt: "Commit this task",
+		});
+
+		expect(result.sessionId).toBeTruthy();
+		expect(resolveRestartLaunchConfig).toHaveBeenCalledWith({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+		});
+		expect(fakeHost.start).toHaveBeenCalledWith(
+			expect.objectContaining({
+				config: expect.objectContaining({
+					providerId: "anthropic",
+					modelId: "claude-sonnet-4-6",
+					mode: "plan",
+					cwd: "/tmp/worktree",
+					apiKey: "sk-current",
+					baseUrl: "https://api.example.test",
+					reasoningEffort: "high",
+					systemPrompt: "Rebuilt system prompt",
+				}),
+				initialMessages: [{ role: "user", content: "Initial prompt" }],
+			}),
+		);
+		expect(fakeHost.send).toHaveBeenCalledWith({
+			sessionId: expect.stringMatching(/^task-1-/),
+			prompt: "Commit this task",
+			userImages: undefined,
+		});
+	});
+
+	it("reports a typed config error when no persisted session can be restarted", async () => {
+		const fakeHost = {
+			start: vi.fn(async () => ({ sessionId: "session-1", result: {} })),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		expect(await runtime.canRestartTaskSession("task-1")).toBe(false);
+		await expect(runtime.restartTaskSession({ taskId: "task-1", prompt: "Continue" })).rejects.toBeInstanceOf(
+			ClineSessionConfigUnavailableError,
+		);
+	});
+
+	it("wraps restart launch config failures with the actionable detail", async () => {
+		const persistedRecord = createPersistedRecord({
+			sessionId: "task-1-persisted",
+			status: "completed",
+			startedAt: "2026-03-17T10:00:00.000Z",
+			updatedAt: "2026-03-17T10:05:00.000Z",
+		});
+		const fakeHost = {
+			start: vi.fn(async () => ({ sessionId: "session-1", result: {} })),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => persistedRecord),
+			list: vi.fn(async () => [persistedRecord]),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+			resolveRestartLaunchConfig: async () => {
+				throw new Error("No native Cline provider is configured.");
+			},
+		});
+
+		const error = await runtime.restartTaskSession({ taskId: "task-1", prompt: "Continue" }).catch((cause) => cause);
+
+		expect(error).toBeInstanceOf(ClineSessionConfigUnavailableError);
+		expect((error as Error).message).toContain("No native Cline provider is configured.");
+		expect((error as Error).message).toContain("Restart the task");
+		expect(fakeHost.start).not.toHaveBeenCalled();
 	});
 });

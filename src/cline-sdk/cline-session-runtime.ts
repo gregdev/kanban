@@ -10,6 +10,16 @@ import {
 	createClineMcpRuntimeService,
 } from "./cline-mcp-runtime-service";
 import { createKanbanClineLogger } from "./cline-runtime-logger";
+import { ClineSessionConfigUnavailableError } from "./cline-session-errors";
+import {
+	type ClineRestartLaunchContext,
+	type ClineRestartLaunchContextRequest,
+	createPersistedClineStartConfig,
+	KANBAN_CLINE_START_CONFIG_METADATA_KEY,
+	type PersistedClineStartConfig,
+	readPersistedClineStartConfig,
+	resolveClineRestartLaunchRequest,
+} from "./cline-session-launch-config";
 import { buildSessionIdPrefix, createSessionId } from "./cline-session-state";
 import { CLINE_MODEL_CATALOG_DEFAULTS } from "./sdk-provider-boundary";
 import {
@@ -136,30 +146,61 @@ export interface ClineSessionRuntime {
 	clearTaskSessions(taskId: string): Promise<void>;
 	getTaskSessionId(taskId: string): string | null;
 	getTaskProviderId(taskId: string): string | null;
-	canRestartTaskSession(taskId: string): boolean;
+	/**
+	 * Whether a dead task session can be rebuilt. True while the in-memory start
+	 * request is available, and after a runtime restart when the task still has a
+	 * persisted SDK session to replay.
+	 */
+	canRestartTaskSession(taskId: string): Promise<boolean>;
 	readPersistedTaskSession(taskId: string): Promise<ClinePersistedTaskSessionSnapshot | null>;
 	dispose(): Promise<void>;
 }
+
+/**
+ * Rebuilds the launch context the runtime cannot persist (system prompt,
+ * interactive hooks, and the current provider credentials) when a restart
+ * outlives the in-memory start request.
+ */
+export type ClineRestartLaunchContextResolver = (
+	input: ClineRestartLaunchContextRequest,
+) => Promise<ClineRestartLaunchContext | null>;
 
 export interface CreateInMemoryClineSessionRuntimeOptions {
 	onTaskEvent?: (taskId: string, event: unknown) => void;
 	createSessionHost?: () => Promise<ClineSessionHostBoundary>;
 	createMcpRuntimeService?: () => ClineMcpRuntimeService;
+	resolveRestartLaunchConfig?: ClineRestartLaunchContextResolver;
 }
 
-// Best-effort: write the Kanban task title to the SDK session metadata so external session
-// lists (e.g. the Cline extension) show a human-readable name. Kanban never reads this back.
-async function persistKanbanTitleToClineSessionMetadata(
+// Best-effort: write the Kanban task title plus the secret-free start config to
+// the SDK session metadata. The SDK owns the session store, so this keeps
+// restart state next to the session it describes instead of inventing a second
+// Kanban-side store.
+async function persistKanbanSessionMetadata(
 	sessionHost: ClineSessionHostBoundary,
 	sessionId: string,
-	taskTitle: string | undefined,
+	input: {
+		taskTitle?: string;
+		startConfig: PersistedClineStartConfig;
+	},
 ): Promise<void> {
-	const title = taskTitle?.trim();
-	if (!title) return;
+	const title = input.taskTitle?.trim();
+	if (!sessionHost.update) {
+		return;
+	}
 	try {
-		await sessionHost.update?.(sessionId, { title });
+		const existingRecord = await sessionHost.get(sessionId);
+		const existingMetadata = existingRecord?.metadata ?? {};
+		await sessionHost.update(sessionId, {
+			...(title ? { title } : {}),
+			metadata: {
+				...existingMetadata,
+				[KANBAN_CLINE_START_CONFIG_METADATA_KEY]: input.startConfig,
+			},
+		});
 	} catch {
-		// Best-effort only — Kanban board title remains canonical regardless.
+		// Best-effort only — Kanban board title remains canonical, and a restart
+		// can still fall back to the session record's provider/model/cwd.
 	}
 }
 
@@ -175,11 +216,13 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		Omit<StartClineSessionRuntimeRequest, "prompt" | "images" | "initialMessages">
 	>();
 	private readonly mcpToolBundleByTaskId = new Map<string, ClineMcpToolBundle>();
+	private readonly resolveRestartLaunchConfig: ClineRestartLaunchContextResolver | null;
 	private sessionHostPromise: Promise<ClineSessionHostBoundary> | null = null;
 
 	constructor(options: CreateInMemoryClineSessionRuntimeOptions = {}) {
 		this.onTaskEvent = options.onTaskEvent ?? null;
 		this.createSessionHost = options.createSessionHost ?? createClineSdkSessionHost;
+		this.resolveRestartLaunchConfig = options.resolveRestartLaunchConfig ?? null;
 		const createMcpRuntimeService = options.createMcpRuntimeService ?? createClineMcpRuntimeService;
 		this.clineMcpRuntimeService = createMcpRuntimeService();
 	}
@@ -302,6 +345,18 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		}
 
 		let result: unknown = startResult.result ?? null;
+		await persistKanbanSessionMetadata(sessionHost, startResult.sessionId, {
+			taskTitle: request.taskTitle,
+			startConfig: createPersistedClineStartConfig({
+				taskId: request.taskId,
+				providerId: request.providerId,
+				modelId: request.modelId,
+				mode: resolvedMode,
+				baseUrl: request.baseUrl,
+				reasoningEffort: request.reasoningEffort,
+				agentCommandTimeoutSec: request.agentCommandTimeoutSec,
+			}),
+		});
 		if (shouldSendInitialTurn) {
 			try {
 				result = await sessionHost.send({
@@ -315,8 +370,6 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 				throw error;
 			}
 		}
-
-		await persistKanbanTitleToClineSessionMetadata(sessionHost, startResult.sessionId, request.taskTitle);
 
 		return {
 			sessionId: startResult.sessionId,
@@ -333,17 +386,63 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		mode?: RuntimeTaskSessionMode;
 	}): Promise<StartClineSessionRuntimeResult> {
 		const lastStartRequest = this.lastStartRequestByTaskId.get(input.taskId);
-		if (!lastStartRequest) {
-			throw new Error(`No previous Cline session config is available for task ${input.taskId}.`);
+		if (lastStartRequest) {
+			return await this.startTaskSession({
+				...lastStartRequest,
+				prompt: input.prompt,
+				initialMessages: input.initialMessages,
+				images: input.images,
+				mode: input.mode ?? lastStartRequest.mode,
+			});
+		}
+
+		// The runtime process restarted (rebuild, crash recovery) and lost the
+		// in-memory start request. Rebuild it from the persisted SDK session and
+		// the launch context the owning service can still resolve.
+		const snapshot = await this.readPersistedTaskSession(input.taskId).catch(() => null);
+		if (!snapshot) {
+			throw new ClineSessionConfigUnavailableError(input.taskId);
+		}
+		const context = await this.resolvePersistedClineLaunchContext(input.taskId, snapshot.record);
+		const launchRequest = resolveClineRestartLaunchRequest({
+			record: snapshot.record,
+			context,
+			mode: input.mode,
+		});
+		if (!launchRequest) {
+			throw new ClineSessionConfigUnavailableError(input.taskId);
 		}
 
 		return await this.startTaskSession({
-			...lastStartRequest,
+			...launchRequest,
+			taskId: input.taskId,
 			prompt: input.prompt,
-			initialMessages: input.initialMessages,
+			initialMessages: input.initialMessages ?? snapshot.messages,
 			images: input.images,
-			mode: input.mode ?? lastStartRequest.mode,
 		});
+	}
+
+	private async resolvePersistedClineLaunchContext(
+		taskId: string,
+		record: ClineSdkSessionRecord,
+	): Promise<ClineRestartLaunchContext | null> {
+		const persistedStartConfig = readPersistedClineStartConfig(record);
+		const cwd = record.cwd?.trim() || record.workspaceRoot?.trim() || "";
+		if (!this.resolveRestartLaunchConfig) {
+			return null;
+		}
+		try {
+			return await this.resolveRestartLaunchConfig({
+				taskId,
+				cwd,
+				providerId: persistedStartConfig?.providerId ?? record.provider?.trim() ?? "",
+				modelId: persistedStartConfig?.modelId ?? record.model?.trim() ?? "",
+			});
+		} catch (error) {
+			// Surface the resolver's actionable detail (for example a missing
+			// provider configuration) instead of a bare "cannot restart" error.
+			throw new ClineSessionConfigUnavailableError(taskId, error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	async sendTaskSessionInput(
@@ -478,8 +577,15 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		return this.lastStartRequestByTaskId.get(taskId)?.providerId ?? null;
 	}
 
-	canRestartTaskSession(taskId: string): boolean {
-		return this.lastStartRequestByTaskId.has(taskId);
+	async canRestartTaskSession(taskId: string): Promise<boolean> {
+		if (this.lastStartRequestByTaskId.has(taskId)) {
+			return true;
+		}
+		// After a runtime restart the in-memory start request is gone, but the SDK
+		// still owns the persisted session history. That history is what makes a
+		// rebuild possible, so it - not map membership - decides resumability.
+		const snapshot = await this.readPersistedTaskSession(taskId).catch(() => null);
+		return snapshot !== null;
 	}
 
 	async readPersistedTaskSession(taskId: string): Promise<ClinePersistedTaskSessionSnapshot | null> {

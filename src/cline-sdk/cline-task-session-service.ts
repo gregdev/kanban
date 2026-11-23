@@ -23,7 +23,10 @@ import {
 	createInMemoryClineMessageRepository,
 	createTaskEntryFromPersistedSession,
 } from "./cline-message-repository";
+import { createClineProviderService, type ResolvedClineLaunchConfig } from "./cline-provider-service";
 import { type ClineRuntimeSetup, createClineRuntimeSetup } from "./cline-runtime-setup";
+import { ClineSessionConfigUnavailableError } from "./cline-session-errors";
+import type { ClineRestartLaunchContext, ClineRestartLaunchContextRequest } from "./cline-session-launch-config";
 import {
 	type ClineSessionRuntime,
 	type CreateInMemoryClineSessionRuntimeOptions,
@@ -120,11 +123,20 @@ export interface ClineTaskSessionService {
 	dispose(): Promise<void>;
 }
 
+/** Narrow view of the provider service needed to rebuild a restart launch config. */
+export interface ClineTaskSessionProviderConfigResolver {
+	resolveLaunchConfig(overrides?: {
+		providerIdOverride?: string;
+		modelIdOverride?: string;
+	}): Promise<ResolvedClineLaunchConfig>;
+}
+
 export interface CreateInMemoryClineTaskSessionServiceOptions {
 	createSessionRuntime?: (options: CreateInMemoryClineSessionRuntimeOptions) => ClineSessionRuntime;
 	createMessageRepository?: () => ClineMessageRepository;
 	createRuntimeSetup?: (workspacePath: string) => Promise<ClineRuntimeSetup>;
 	watcherRegistry?: ClineWatcherRegistry;
+	createProviderConfigResolver?: () => ClineTaskSessionProviderConfigResolver;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -184,11 +196,14 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 	private readonly sessionRuntime: ClineSessionRuntime;
 	private readonly messageRepository: ClineMessageRepository;
 	private readonly watcherRegistry: ClineWatcherRegistry;
+	private readonly providerConfigResolver: ClineTaskSessionProviderConfigResolver;
 	private readonly runtimeSetupLeaseByWorkspacePath = new Map<string, Promise<ClineRuntimeSetupLease>>();
 
 	constructor(options: CreateInMemoryClineTaskSessionServiceOptions = {}) {
 		const createSessionRuntime = options.createSessionRuntime ?? createInMemoryClineSessionRuntime;
 		const createMessageRepository = options.createMessageRepository ?? createInMemoryClineMessageRepository;
+		const createProviderConfigResolver = options.createProviderConfigResolver ?? createClineProviderService;
+		this.providerConfigResolver = createProviderConfigResolver();
 		this.watcherRegistry =
 			options.watcherRegistry ??
 			createClineWatcherRegistry({
@@ -198,6 +213,10 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			onTaskEvent: (taskId: string, event: unknown) => {
 				this.handleTaskEvent(taskId, event);
 			},
+			// A restart can outlive the in-memory start request (runtime rebuild,
+			// crash recovery). Rebuild the system prompt and provider credentials
+			// from the same sources the initial start used.
+			resolveRestartLaunchConfig: (input) => this.resolveRestartLaunchConfig(input),
 		});
 		this.messageRepository = createMessageRepository();
 	}
@@ -236,11 +255,17 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 	): void {
 		const errorMessage = toErrorMessage(error);
 		const creditLimitError = this.isClineProviderForTask(taskId) && isCreditLimitError(errorMessage);
+		// A missing launch config is a configuration problem, not a crashed SDK
+		// call. Keep its actionable guidance intact instead of prefixing it with
+		// "Cline SDK ... failed" and inviting another message that cannot work.
+		const configUnavailable = error instanceof ClineSessionConfigUnavailableError;
 		if (!creditLimitError) {
 			const systemMessage = createMessage(
 				taskId,
 				"system",
-				`Cline SDK ${context} failed: ${errorMessage}. You can send another message to continue the conversation.`,
+				configUnavailable
+					? errorMessage
+					: `Cline SDK ${context} failed: ${errorMessage}. You can send another message to continue the conversation.`,
 			);
 			entry.messages.push(systemMessage);
 			this.emitMessage(taskId, systemMessage);
@@ -253,7 +278,9 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			lastHookAt: now(),
 			warningMessage: creditLimitError ? null : errorMessage,
 			latestHookActivity: {
-				activityText: `${context === "start" ? "Start" : context === "send" ? "Send" : "Resume"} failed: ${errorMessage}`,
+				activityText: configUnavailable
+					? errorMessage
+					: `${context === "start" ? "Start" : context === "send" ? "Send" : "Resume"} failed: ${errorMessage}`,
 				toolName: null,
 				toolInputSummary: null,
 				finalMessage: errorMessage,
@@ -287,8 +314,8 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			};
 		}
 
-		if (isHomeAgentSessionId(input.taskId) && !this.sessionRuntime.canRestartTaskSession(input.taskId)) {
-			throw new Error(`No previous Cline session config is available for task ${input.taskId}.`);
+		if (isHomeAgentSessionId(input.taskId) && !(await this.sessionRuntime.canRestartTaskSession(input.taskId))) {
+			throw new ClineSessionConfigUnavailableError(input.taskId);
 		}
 
 		const persistedSnapshot = await this.sessionRuntime.readPersistedTaskSession(input.taskId);
@@ -742,7 +769,10 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			// A persisted session can outlive the live SDK host. Rebuild a live
 			// session from repaired persisted history exactly once; this is not a
 			// retry loop and the SDK still owns bounded retries for the new turn.
-			if (!isMissingLiveClineSessionError(error) || !this.sessionRuntime.canRestartTaskSession(input.taskId)) {
+			if (
+				!isMissingLiveClineSessionError(error) ||
+				!(await this.sessionRuntime.canRestartTaskSession(input.taskId))
+			) {
 				throw error;
 			}
 			const persistedMessages =
@@ -788,7 +818,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			return null;
 		}
 		if (!this.sessionRuntime.getTaskSessionId(taskId)) {
-			if (isHomeAgentSessionId(taskId) && !this.sessionRuntime.canRestartTaskSession(taskId)) {
+			if (isHomeAgentSessionId(taskId) && !(await this.sessionRuntime.canRestartTaskSession(taskId))) {
 				return null;
 			}
 		}
@@ -908,7 +938,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 
 		const effectiveMode: RuntimeTaskSessionMode = entry.summary.mode ?? "act";
 		if (!this.sessionRuntime.getTaskSessionId(taskId)) {
-			if (isHomeAgentSessionId(taskId) && !this.sessionRuntime.canRestartTaskSession(taskId)) {
+			if (isHomeAgentSessionId(taskId) && !(await this.sessionRuntime.canRestartTaskSession(taskId))) {
 				return null;
 			}
 		}
@@ -1089,6 +1119,44 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			.catch(() => {
 				// Best effort checkpointing only.
 			});
+	}
+
+	// Rebuild what the runtime cannot persist for a restart that outlived the
+	// in-memory start request: the system prompt (workspace rules + home-agent
+	// append), the interactive runtime hooks, and current provider credentials.
+	private async resolveRestartLaunchConfig(
+		input: ClineRestartLaunchContextRequest,
+	): Promise<ClineRestartLaunchContext | null> {
+		const cwd = input.cwd.trim();
+		if (!cwd) {
+			return null;
+		}
+		const launchConfig = await this.providerConfigResolver.resolveLaunchConfig({
+			providerIdOverride: input.providerId || undefined,
+			modelIdOverride: input.modelId || undefined,
+		});
+		const providerId = launchConfig.providerId.trim() || input.providerId || SDK_DEFAULT_PROVIDER_ID;
+		const runtimeSetup = await this.ensureRuntimeSetup(cwd);
+		let systemPrompt = await resolveClineSdkSystemPrompt({
+			cwd,
+			providerId,
+			rules: runtimeSetup.loadRules(),
+		});
+		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
+		if (appendedSystemPrompt) {
+			systemPrompt = `${systemPrompt}\n\n${appendedSystemPrompt}`;
+		}
+		return {
+			cwd,
+			providerId,
+			modelId: launchConfig.modelId,
+			apiKey: launchConfig.apiKey,
+			baseUrl: launchConfig.baseUrl,
+			reasoningEffort: launchConfig.reasoningEffort,
+			systemPrompt,
+			userInstructionService: runtimeSetup.userInstructionService,
+			requestToolApproval: runtimeSetup.requestToolApproval,
+		};
 	}
 
 	private async ensureRuntimeSetup(workspacePath: string): Promise<ClineRuntimeSetup> {
