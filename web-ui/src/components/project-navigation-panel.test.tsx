@@ -42,6 +42,8 @@ function PanelWithLayout(
 
 const SIDEBAR_MIN_EXPANDED_WIDTH = 200;
 const SIDEBAR_MAX_EXPANDED_WIDTH = 600;
+const AGENT_EXPANDED_MAX_WIDTH = 900;
+const AGENT_EXPANDED_WIDTH_STYLE = `min(100vw, ${AGENT_EXPANDED_MAX_WIDTH}px)`;
 const BOARD_SURFACE_HORIZONTAL_CHROME_PX = 40;
 
 const PROJECTS: RuntimeProjectSummary[] = [
@@ -237,7 +239,7 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.querySelector('[aria-label="Expand Kanban agent"]')).not.toBeNull();
 	});
 
-	it("expands the sidebar to fill the screen and restores its previous width", () => {
+	it("expands the sidebar to a capped reading width and restores its previous width", () => {
 		renderPanel({ activeSection: "agent" });
 		const sidebar = getSidebar(container);
 		const initialWidth = sidebar.style.width;
@@ -249,15 +251,28 @@ describe("ProjectNavigationPanel width persistence", () => {
 
 		expect(sidebar.classList.contains("fixed")).toBe(true);
 		expect(sidebar.classList.contains("relative")).toBe(false);
-		expect(sidebar.style.width).toBe("100vw");
+		// The expanded view is capped below the viewport width so long lines stay readable.
+		expect(sidebar.style.width).toBe(AGENT_EXPANDED_WIDTH_STYLE);
+		expect(AGENT_EXPANDED_MAX_WIDTH).toBeLessThan(window.innerWidth);
 		expect(sidebar.style.minWidth).toBe("0");
 		expect(sidebar.style.maxWidth).toBe("none");
 		expect(sidebar.style.height).toBe("100svh");
+		expect(sidebar.style.transition).toContain("width");
 		expect(container.querySelector('[aria-label="Resize sidebar"]')).toBeNull();
 
 		const collapseButton = container.querySelector('[aria-label="Collapse Kanban agent"]') as HTMLButtonElement;
 		act(() => {
 			collapseButton.click();
+		});
+
+		// The overlay frame stays mounted while the width transition retracts it.
+		expect(sidebar.classList.contains("fixed")).toBe(true);
+		expect(sidebar.style.width).toBe(initialWidth);
+
+		act(() => {
+			const transitionEnd = new Event("transitionend", { bubbles: true });
+			Object.defineProperty(transitionEnd, "propertyName", { value: "width" });
+			sidebar.dispatchEvent(transitionEnd);
 		});
 
 		expect(sidebar.classList.contains("relative")).toBe(true);

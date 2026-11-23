@@ -12,7 +12,15 @@ import {
 	Plus,
 	X,
 } from "lucide-react";
-import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+	type MouseEvent as ReactMouseEvent,
+	type ReactNode,
+	type TransitionEvent as ReactTransitionEvent,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { canShowFeaturebaseFeedbackButton } from "@/components/featurebase-feedback-button";
 import { Button } from "@/components/ui/button";
 import { ClineIcon } from "@/components/ui/cline-icon";
@@ -41,12 +49,18 @@ import {
 } from "@/storage/local-storage-store";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { isMacPlatform, modifierKeyLabel } from "@/utils/platform";
-import { useUnmount, useWindowEvent } from "@/utils/react-use";
+import { useMedia, useUnmount, useWindowEvent } from "@/utils/react-use";
 
 const COLLAPSED_WIDTH = 48;
 const SIDEBAR_COLLAPSE_THRESHOLD = 120;
 const SIDEBAR_MIN_EXPANDED_WIDTH = 200;
 const SIDEBAR_MAX_EXPANDED_WIDTH = 600;
+// The expanded agent view is a reading surface, so it stops growing once it
+// reaches a comfortable line length instead of stretching across wide monitors.
+const AGENT_EXPANDED_MAX_WIDTH = 900;
+const AGENT_EXPANDED_TRANSITION_MS = 200;
+const AGENT_EXPANDED_WIDTH_STYLE = `min(100vw, ${AGENT_EXPANDED_MAX_WIDTH}px)`;
+const AGENT_EXPANDED_TRANSITION = `width ${AGENT_EXPANDED_TRANSITION_MS}ms ease`;
 const GITHUB_ISSUES_URL = "https://github.com/cline/kanban/issues";
 
 interface TaskCountBadge {
@@ -117,10 +131,46 @@ export function ProjectNavigationPanel({
 		: 0;
 
 	const isMobile = useIsMobile();
+	const prefersReducedMotion = useMedia("(prefers-reduced-motion: reduce)", false);
 	const [isMobileClosing, setIsMobileClosing] = useState(false);
+	const isExpandedSurface = !isMobile && !isCollapsed && activeSection === "agent";
 	// The fill-screen mode only applies while the agent section is visible; the
 	// panel falls back to its normal width if the section changes underneath it.
-	const isExpandedActive = isExpanded && !isMobile && !isCollapsed && activeSection === "agent";
+	const isExpandedActive = isExpanded && isExpandedSurface;
+	const [isExpandedClosing, setIsExpandedClosing] = useState(false);
+	// Retracting keeps the overlay frame mounted until the width transition
+	// finishes, otherwise the panel would rejoin the flex row mid-animation and
+	// the content beside it would jump.
+	const keepExpandedFrame = (isExpanded || isExpandedClosing) && isExpandedSurface;
+
+	const handleToggleExpanded = useCallback(() => {
+		if (isExpandedActive && !prefersReducedMotion) {
+			setIsExpandedClosing(true);
+		} else {
+			setIsExpandedClosing(false);
+		}
+		onToggleExpanded();
+	}, [isExpandedActive, onToggleExpanded, prefersReducedMotion]);
+
+	const handleExpandedTransitionEnd = useCallback(
+		(event: ReactTransitionEvent<HTMLElement>) => {
+			if (!isExpandedClosing || event.target !== event.currentTarget || event.propertyName !== "width") {
+				return;
+			}
+			setIsExpandedClosing(false);
+		},
+		[isExpandedClosing],
+	);
+
+	// Fallback for environments where the transition never reports its end
+	// (for example a hidden tab), so the frame cannot get stuck overlaying.
+	useEffect(() => {
+		if (!isExpandedClosing) {
+			return;
+		}
+		const timeout = window.setTimeout(() => setIsExpandedClosing(false), AGENT_EXPANDED_TRANSITION_MS + 100);
+		return () => window.clearTimeout(timeout);
+	}, [isExpandedClosing]);
 
 	useEffect(() => {
 		if (isMobile) {
@@ -289,20 +339,22 @@ export function ProjectNavigationPanel({
 				"flex flex-col min-h-0 overflow-hidden bg-surface-1 shrink-0",
 				isMobile
 					? "fixed inset-y-0 left-0 z-50 shadow-2xl"
-					: isExpandedActive
+					: keepExpandedFrame
 						? "fixed left-0 top-0 z-50 shadow-2xl"
 						: "relative",
 			)}
 			onAnimationEnd={isMobileClosing ? handleMobileCloseAnimationEnd : undefined}
+			onTransitionEnd={handleExpandedTransitionEnd}
 			style={
-				isExpandedActive
+				keepExpandedFrame
 					? {
-							width: "100vw",
+							width: isExpandedActive ? AGENT_EXPANDED_WIDTH_STYLE : sidebarWidth,
 							minWidth: 0,
 							maxWidth: "none",
 							height: "100svh",
 							borderRight: "1px solid var(--color-divider)",
 							boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
+							transition: prefersReducedMotion ? "none" : AGENT_EXPANDED_TRANSITION,
 						}
 					: isMobile
 						? {
@@ -319,7 +371,7 @@ export function ProjectNavigationPanel({
 							}
 			}
 		>
-			{!isMobile && !isExpandedActive && (
+			{!isMobile && !keepExpandedFrame && (
 				<div
 					role="separator"
 					aria-orientation="vertical"
@@ -349,7 +401,7 @@ export function ProjectNavigationPanel({
 								variant="ghost"
 								size="sm"
 								icon={isExpandedActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-								onClick={onToggleExpanded}
+								onClick={handleToggleExpanded}
 								aria-label={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}
 							/>
 						</Tooltip>
