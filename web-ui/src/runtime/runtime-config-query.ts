@@ -44,6 +44,7 @@ export async function saveRuntimeConfig(
 		selectedAgentId?: RuntimeAgentId;
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
+		agentCommandTimeoutSec?: number;
 		shortcuts?: RuntimeProjectShortcut[];
 		readyForReviewNotificationsEnabled?: boolean;
 		commitPromptTemplate?: string;

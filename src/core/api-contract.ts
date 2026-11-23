@@ -938,10 +938,22 @@ export const runtimeAgentDefinitionSchema = z.object({
 });
 export type RuntimeAgentDefinition = z.infer<typeof runtimeAgentDefinitionSchema>;
 
+/**
+ * Timeout for a single native Cline `run_commands` invocation.
+ *
+ * The SDK default is 30s, which is too short for real test suites. Long-running
+ * work should instead be started detached (`setsid ... &`) and polled; see the
+ * append system prompt guidance.
+ */
+export const DEFAULT_AGENT_COMMAND_TIMEOUT_SEC = 300;
+export const MIN_AGENT_COMMAND_TIMEOUT_SEC = 30;
+export const MAX_AGENT_COMMAND_TIMEOUT_SEC = 3600;
+
 export const runtimeConfigResponseSchema = z.object({
 	selectedAgentId: runtimeAgentIdSchema,
 	selectedShortcutLabel: z.string().nullable(),
 	agentAutonomousModeEnabled: z.boolean(),
+	agentCommandTimeoutSec: z.number().int().min(MIN_AGENT_COMMAND_TIMEOUT_SEC).max(MAX_AGENT_COMMAND_TIMEOUT_SEC),
 	debugModeEnabled: z.boolean().optional(),
 	effectiveCommand: z.string().nullable(),
 	globalConfigPath: z.string(),
@@ -962,6 +974,12 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	selectedAgentId: runtimeAgentIdSchema.optional(),
 	selectedShortcutLabel: z.string().nullable().optional(),
 	agentAutonomousModeEnabled: z.boolean().optional(),
+	agentCommandTimeoutSec: z
+		.number()
+		.int()
+		.min(MIN_AGENT_COMMAND_TIMEOUT_SEC)
+		.max(MAX_AGENT_COMMAND_TIMEOUT_SEC)
+		.optional(),
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
 	commitPromptTemplate: z.string().optional(),

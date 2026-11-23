@@ -243,6 +243,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						apiKey: clineLaunchConfig.apiKey,
 						baseUrl: clineLaunchConfig.baseUrl,
 						reasoningEffort: clineLaunchConfig.reasoningEffort,
+						agentCommandTimeoutSec: scopedRuntimeConfig.agentCommandTimeoutSec,
 					});
 
 					let nextSummary = summary;
@@ -425,6 +426,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				let summary = await clineTaskSessionService.reloadTaskSession(body.taskId);
 				if (!summary && isHomeAgentSessionId(body.taskId)) {
 					const clineLaunchConfig = await clineProviderService.resolveLaunchConfig();
+					const scopedRuntimeConfig = await deps.loadScopedRuntimeConfig(workspaceScope);
 					summary = await clineTaskSessionService.startTaskSession({
 						taskId: body.taskId,
 						cwd: workspaceScope.workspacePath,
@@ -435,6 +437,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						apiKey: clineLaunchConfig.apiKey,
 						baseUrl: clineLaunchConfig.baseUrl,
 						reasoningEffort: clineLaunchConfig.reasoningEffort,
+						agentCommandTimeoutSec: scopedRuntimeConfig.agentCommandTimeoutSec,
 					});
 				}
 				if (!summary) {
@@ -626,6 +629,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						}
 					} else {
 						const clineLaunchConfig = await clineProviderService.resolveLaunchConfig();
+						const scopedRuntimeConfig = await deps.loadScopedRuntimeConfig(workspaceScope);
 						summary = await clineTaskSessionService.startTaskSession({
 							taskId: body.taskId,
 							cwd: workspaceScope.workspacePath,
@@ -638,6 +642,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 							apiKey: clineLaunchConfig.apiKey,
 							baseUrl: clineLaunchConfig.baseUrl,
 							reasoningEffort: clineLaunchConfig.reasoningEffort,
+							agentCommandTimeoutSec: scopedRuntimeConfig.agentCommandTimeoutSec,
 						});
 					}
 				}

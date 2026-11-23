@@ -22,6 +22,7 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		selectedAgentId: "claude",
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
+		agentCommandTimeoutSec: 300,
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
 		commitPromptTemplate: "commit",
@@ -80,6 +81,7 @@ describe("buildRuntimeConfigResponse", () => {
 		});
 
 		expect(response.agentAutonomousModeEnabled).toBe(true);
+		expect(response.agentCommandTimeoutSec).toBe(300);
 		expect(response.agents.map((agent) => agent.id)).toEqual(["claude", "codex", "cline", "droid", "kiro"]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "codex")?.defaultArgs).toEqual([]);

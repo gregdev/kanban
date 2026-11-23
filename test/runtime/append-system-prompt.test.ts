@@ -74,6 +74,20 @@ describe("renderAppendSystemPrompt", () => {
 		expect(rendered).not.toContain("codex mcp add linear --url https://mcp.linear.app/mcp");
 	});
 
+	it("adds detached-command guidance for the native Cline agent only", () => {
+		const clinePrompt = renderAppendSystemPrompt("kanban", {
+			agentId: "cline",
+		});
+		expect(clinePrompt).toContain("Command timeout");
+		expect(clinePrompt).toContain("setsid <cmd> > /tmp/<name>.log 2>&1 < /dev/null &");
+		expect(clinePrompt).toContain("`nohup <cmd> &` stays in the same process group");
+
+		const codexPrompt = renderAppendSystemPrompt("kanban", {
+			agentId: "codex",
+		});
+		expect(codexPrompt).not.toContain("setsid");
+	});
+
 	it("renders only the active-agent Linear MCP guidance when an agent is provided", () => {
 		const rendered = renderAppendSystemPrompt("kanban", {
 			agentId: "codex",

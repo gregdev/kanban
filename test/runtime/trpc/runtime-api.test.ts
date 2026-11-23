@@ -181,6 +181,7 @@ function createRuntimeConfigState(): RuntimeConfigState {
 		selectedAgentId: "claude",
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
+		agentCommandTimeoutSec: 300,
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
 		commitPromptTemplate: "commit",
@@ -1600,6 +1601,7 @@ describe("createRuntimeApi startTaskSession", () => {
 			apiKey: "sk-or-test",
 			baseUrl: "https://openrouter.ai/api/v1",
 			reasoningEffort: undefined,
+			agentCommandTimeoutSec: 300,
 		});
 	});
 

@@ -13,6 +13,7 @@ import { createKanbanClineLogger } from "./cline-runtime-logger";
 import { buildSessionIdPrefix, createSessionId } from "./cline-session-state";
 import { CLINE_MODEL_CATALOG_DEFAULTS } from "./sdk-provider-boundary";
 import {
+	type ClineSdkExtraTool,
 	type ClineSdkPersistedMessage,
 	type ClineSdkSessionHost,
 	type ClineSdkSessionRecord,
@@ -20,6 +21,7 @@ import {
 	type ClineSdkToolApprovalRequest,
 	type ClineSdkToolApprovalResult,
 	type ClineSdkUserInstructionService,
+	createClineSdkRunCommandsTool,
 	createClineSdkSessionHost,
 } from "./sdk-runtime-boundary";
 
@@ -80,6 +82,8 @@ export interface StartClineSessionRuntimeRequest {
 	baseUrl?: string | null;
 	reasoningEffort?: RuntimeClineReasoningEffort | null;
 	systemPrompt: string;
+	/** Per-command timeout for the native agent's `run_commands` tool. */
+	agentCommandTimeoutSec?: number;
 	userInstructionService?: ClineSdkUserInstructionService;
 	requestToolApproval?: (request: ClineSdkToolApprovalRequest) => Promise<ClineSdkToolApprovalResult>;
 }
@@ -178,6 +182,7 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 			baseUrl: request.baseUrl,
 			reasoningEffort: request.reasoningEffort,
 			systemPrompt: request.systemPrompt,
+			agentCommandTimeoutSec: request.agentCommandTimeoutSec,
 			taskTitle: request.taskTitle,
 			userInstructionService: request.userInstructionService,
 			requestToolApproval: request.requestToolApproval,
@@ -198,6 +203,21 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		}
 		this.replaceTaskMcpToolBundle(request.taskId, mcpToolBundle);
 		const hasMcpExtraTools = Boolean(mcpToolBundle && mcpToolBundle.tools.length > 0);
+		const extraTools: ClineSdkExtraTool[] = [...(mcpToolBundle?.tools ?? [])];
+		const commandTimeoutMs =
+			typeof request.agentCommandTimeoutSec === "number" ? Math.round(request.agentCommandTimeoutSec * 1000) : null;
+		if (commandTimeoutMs !== null) {
+			const runCommandsTool = createClineSdkRunCommandsTool({
+				cwd: request.cwd,
+				timeoutMs: commandTimeoutMs,
+			});
+			// Registered last so it shadows the SDK's built-in `run_commands`, which
+			// hard-codes a 30s timeout. See createClineSdkRunCommandsTool.
+			if (runCommandsTool) {
+				extraTools.push(runCommandsTool);
+			}
+		}
+		const hasExtraTools = extraTools.length > 0;
 
 		const sessionHost = await this.ensureSessionHost();
 		const userImages = toSdkUserImages(request.images);
@@ -249,7 +269,7 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 						providerId: request.providerId,
 						modelId: request.modelId,
 					}),
-					...(hasMcpExtraTools ? { extraTools: mcpToolBundle?.tools ?? [] } : {}),
+					...(hasExtraTools ? { extraTools } : {}),
 				},
 				...(request.requestToolApproval
 					? { capabilities: { requestToolApproval: request.requestToolApproval } }

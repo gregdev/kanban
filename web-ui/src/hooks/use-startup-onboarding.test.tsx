@@ -19,6 +19,7 @@ function createRuntimeConfigResponse(selectedAgentId: RuntimeConfigResponse["sel
 		selectedAgentId,
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
+		agentCommandTimeoutSec: 300,
 		effectiveCommand: selectedAgentId,
 		globalConfigPath: "/tmp/.cline/kanban/config.json",
 		projectConfigPath: "/tmp/project/.cline/kanban/config.json",

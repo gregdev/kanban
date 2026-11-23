@@ -442,6 +442,102 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("defaults and clamps the native agent command timeout", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-command-timeout-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-command-timeout-",
+		);
+		const runtimeConfigDir = join(tempHome, ".cline", "kanban");
+		mkdirSync(runtimeConfigDir, { recursive: true });
+		const writeGlobalConfig = (value: unknown) => {
+			writeFileSync(
+				join(runtimeConfigDir, "config.json"),
+				JSON.stringify({ selectedAgentId: "cline", agentCommandTimeoutSec: value }, null, 2),
+				"utf8",
+			);
+		};
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				writeGlobalConfig(undefined);
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(300);
+
+				writeGlobalConfig(120.6);
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(121);
+
+				writeGlobalConfig(5);
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(30);
+
+				writeGlobalConfig(999_999);
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(3600);
+
+				writeGlobalConfig("not-a-number");
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(300);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("persists only non-default native agent command timeouts", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir(
+			"kanban-home-runtime-config-command-timeout-persist-",
+		);
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-command-timeout-persist-",
+		);
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const updated = await updateRuntimeConfig(tempProject, { agentCommandTimeoutSec: 900 });
+				expect(updated.agentCommandTimeoutSec).toBe(900);
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(900);
+
+				const persisted = JSON.parse(readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8")) as {
+					agentCommandTimeoutSec?: number;
+				};
+				expect(persisted.agentCommandTimeoutSec).toBe(900);
+
+				const reset = await updateRuntimeConfig(tempProject, { agentCommandTimeoutSec: 300 });
+				expect(reset.agentCommandTimeoutSec).toBe(300);
+
+				const resetPayload = JSON.parse(
+					readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8"),
+				) as { agentCommandTimeoutSec?: number };
+				expect(resetPayload.agentCommandTimeoutSec).toBeUndefined();
+				expect((await loadRuntimeConfig(tempProject)).agentCommandTimeoutSec).toBe(300);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("clamps native agent command timeout updates", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir(
+			"kanban-home-runtime-config-command-timeout-clamp-",
+		);
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-command-timeout-clamp-",
+		);
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				expect((await updateRuntimeConfig(tempProject, { agentCommandTimeoutSec: 1 })).agentCommandTimeoutSec).toBe(
+					30,
+				);
+				expect(
+					(await updateRuntimeConfig(tempProject, { agentCommandTimeoutSec: Number.MAX_SAFE_INTEGER }))
+						.agentCommandTimeoutSec,
+				).toBe(3600);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("normalizes configured agent env and PATH additions", async () => {
 		if (process.platform === "win32") {
 			return;

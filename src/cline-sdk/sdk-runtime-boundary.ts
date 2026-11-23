@@ -10,6 +10,8 @@ import {
 	ClineCore,
 	type ClineCoreStartInput,
 	type CoreSessionEvent,
+	createDefaultExecutors,
+	createDefaultTools,
 	createUserInstructionConfigService,
 	formatRulesForSystemPrompt,
 	getClineDefaultSystemPrompt,
@@ -55,6 +57,47 @@ export interface ClineSdkSlashCommand {
 }
 export type ClineSdkToolApprovalRequest = ToolApprovalRequest;
 export type ClineSdkToolApprovalResult = ToolApprovalResult;
+export type ClineSdkExtraTool = NonNullable<ClineSdkStartSessionInput["config"]["extraTools"]>[number];
+
+export interface CreateClineSdkRunCommandsToolOptions {
+	/** Working directory for command execution. */
+	cwd: string;
+	/** Per-command timeout in milliseconds. */
+	timeoutMs: number;
+}
+
+/**
+ * Build the SDK `run_commands` tool with an explicit command timeout.
+ *
+ * Why this exists: @clinebot/core 0.0.38 hard-codes a 30s timeout in both the
+ * tool wrapper (`bashTimeoutMs`) and the process executor (`timeoutMs`), and
+ * exposes no session-level setting for either. The SDK tool factory already
+ * accepts the knob, so this reuses the SDK factories instead of reimplementing
+ * the tool.
+ *
+ * Register the result through `localRuntime.extraTools`: the SDK composes tools
+ * as `[...builtinTools, ...extraTools]` and the agent runtime stores them in a
+ * name-keyed map, so a later `run_commands` replaces the builtin for both the
+ * model-facing schema and execution.
+ *
+ * TODO: delete this override once @clinebot/core threads `bashTimeoutMs` through
+ * `CoreSessionConfig` / `LocalRuntimeStartOptions`.
+ */
+export function createClineSdkRunCommandsTool(options: CreateClineSdkRunCommandsToolOptions): ClineSdkExtraTool | null {
+	if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+		return null;
+	}
+	const bashExecutor = createDefaultExecutors({ bash: { timeoutMs: options.timeoutMs } }).bash;
+	if (!bashExecutor) {
+		return null;
+	}
+	const tools = createDefaultTools({
+		cwd: options.cwd,
+		bashTimeoutMs: options.timeoutMs,
+		executors: { bash: bashExecutor },
+	});
+	return tools.find((tool) => tool.name === "run_commands") ?? null;
+}
 
 export async function createClineSdkSessionHost(): Promise<ClineSdkSessionHost> {
 	return await ClineCore.create({

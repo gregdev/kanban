@@ -74,6 +74,8 @@ export interface StartClineTaskSessionRequest {
 	apiKey?: string | null;
 	baseUrl?: string | null;
 	reasoningEffort?: RuntimeClineReasoningEffort | null;
+	/** Per-command timeout for the native agent's `run_commands` tool. */
+	agentCommandTimeoutSec?: number;
 	systemPrompt?: string | null;
 }
 
@@ -464,6 +466,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 					apiKey: request.apiKey,
 					baseUrl: request.baseUrl,
 					reasoningEffort: request.reasoningEffort,
+					agentCommandTimeoutSec: request.agentCommandTimeoutSec,
 					systemPrompt,
 					userInstructionService: runtimeSetup.userInstructionService,
 					requestToolApproval: runtimeSetup.requestToolApproval,

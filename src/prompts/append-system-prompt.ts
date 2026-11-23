@@ -50,6 +50,21 @@ function resolveHomeAgentId(taskId: string): RuntimeAgentId | null {
 	return maybeAgentId;
 }
 
+function renderCommandTimeoutGuidance(agentId: RuntimeAgentId | null): string {
+	// Only the native Cline agent runs foreground commands through Kanban's
+	// `run_commands` timeout. PTY agents manage their own command limits.
+	if (agentId !== "cline") {
+		return "";
+	}
+	return [
+		"- Foreground `run_commands` calls are killed when the Cline command timeout elapses (Settings > General > Command timeout). For long test suites or builds, start the command detached and poll its log instead:",
+		"  `setsid <cmd> > /tmp/<name>.log 2>&1 < /dev/null &`",
+		"  `setsid` is required: plain `nohup <cmd> &` stays in the same process group and is killed along with the foreground command.",
+		"  Poll with `tail -n 50 /tmp/<name>.log` and check that the process is still running with `pgrep -f <name>`.",
+		"",
+	].join("\n");
+}
+
 function renderLinearSetupGuidanceForAgent(agentId: RuntimeAgentId | null): string {
 	switch (agentId) {
 		case "cline":
@@ -157,6 +172,7 @@ Use this prefix for every Kanban command in this session:
 
 - NEVER use file-editing tools. You are not a coding agent. If you catch yourself about to edit a file, stop and suggest creating a Kanban task instead.
 - When using the \`run_commands\` tool, always pass \`commands\` as an array, even when running only one command.
+${renderCommandTimeoutGuidance(selectedAgentId)}
 
 # GitHub and Linear Guidance
 

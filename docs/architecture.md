@@ -347,6 +347,44 @@ GUI desktop builds separately append common tool dirs to `PATH` before starting 
 `~/.local/share/pnpm/bin`, `~/.cargo/bin`, `~/.bun/bin`, plus `PNPM_HOME`, `PNPM_HOME/bin`, and
 `NVM_BIN` when those env vars are set.
 
+### Native agent command timeout
+
+The native Cline agent runs shell commands through the SDK `run_commands` tool. `@clinebot/core`
+0.0.38 hard-codes a 30s timeout in both the tool wrapper and the spawned process executor, and
+exposes no session-level setting for it. Kanban therefore owns the knob via
+`agentCommandTimeoutSec` in `~/.cline/kanban/config.json` (also surfaced as
+Settings -> General -> Command timeout when Cline is the selected agent):
+
+```json
+{
+  "agentCommandTimeoutSec": 900
+}
+```
+
+- Default: 300 seconds. Accepted range: 30-3600 seconds. Out-of-range or non-numeric values are
+  normalized/clamped, and the default value is never written back to disk.
+- `cline-task-session-service.ts` threads the value into `cline-session-runtime.ts`, which
+  rebuilds `run_commands` with the SDK's own factories (`createDefaultExecutors` +
+  `createDefaultTools`) and registers it through `localRuntime.extraTools`. Core composes tools as
+  `[...builtins, ...extraTools]` and the agent runtime stores them in a name-keyed map, so the
+  later tool shadows the builtin for both the model-facing schema and execution.
+  `sdk-runtime-boundary.ts` owns that override and carries the TODO to delete it once upstream
+  threads `bashTimeoutMs` through session config.
+- PTY agents (claude/codex/gemini/opencode/droid/kiro) do not use this code path.
+
+Foreground commands are still killed once the timeout elapses. Long runs should instead be started
+detached and then polled:
+
+```sh
+setsid <cmd> > /tmp/<name>.log 2>&1 < /dev/null &
+tail -n 50 /tmp/<name>.log
+pgrep -f <name>
+```
+
+`setsid` is required: a plain `nohup ... &` job stays in the agent command's process group, and the
+SDK kills that whole group on timeout. The home sidebar agent receives the same guidance in its
+append system prompt.
+
 ## The Home Sidebar Agent Surface
 
 The home sidebar agent surface is one of the less obvious parts of the architecture.

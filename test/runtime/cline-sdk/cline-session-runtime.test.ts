@@ -128,6 +128,94 @@ describe("InMemoryClineSessionRuntime", () => {
 		);
 	});
 
+	it("registers a timeout-configured run_commands override when a command timeout is configured", async () => {
+		const fakeHost = {
+			start: vi.fn(
+				async (input: {
+					config?: { sessionId?: string };
+					localRuntime?: { extraTools?: Array<{ name: string; timeoutMs?: number }> };
+				}) => ({
+					sessionId: input.config?.sessionId ?? "session-1",
+					result: {},
+				}),
+			),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await runtime.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Run the suite",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			systemPrompt: "You are a helpful coding assistant.",
+			agentCommandTimeoutSec: 45,
+		});
+
+		const startInput = fakeHost.start.mock.calls[0]?.[0];
+		const runCommands = startInput?.localRuntime?.extraTools?.find((tool) => tool.name === "run_commands");
+		expect(runCommands).toBeDefined();
+		// The SDK tool factory sets its wrapper timeout to twice the command timeout.
+		expect(runCommands?.timeoutMs).toBe(90_000);
+
+		await runtime.dispose();
+	});
+
+	it("does not register a run_commands override without a configured command timeout", async () => {
+		const fakeHost = {
+			start: vi.fn(
+				async (input: {
+					config?: { sessionId?: string };
+					localRuntime?: { extraTools?: Array<{ name: string }> };
+				}) => ({
+					sessionId: input.config?.sessionId ?? "session-1",
+					result: {},
+				}),
+			),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await runtime.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Run the suite",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			systemPrompt: "You are a helpful coding assistant.",
+		});
+
+		const startInput = fakeHost.start.mock.calls[0]?.[0];
+		expect(startInput?.localRuntime?.extraTools).toBeUndefined();
+
+		await runtime.dispose();
+	});
+
 	it("leaves reasoning effort unset when no override is provided", async () => {
 		const fakeHost = {
 			start: vi.fn(async (input: { config?: { sessionId?: string; reasoningEffort?: string } }) => ({

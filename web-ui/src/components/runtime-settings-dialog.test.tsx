@@ -75,6 +75,7 @@ vi.mock("@radix-ui/react-select", () => ({
 }));
 
 const resetLayoutCustomizationsMock = vi.hoisted(() => vi.fn());
+const runtimeConfigSaveMock = vi.hoisted(() => vi.fn(async () => true));
 const clineSetupSectionOnSavedRef = vi.hoisted(() => ({
 	onSaved: null as null | (() => void),
 }));
@@ -142,7 +143,7 @@ vi.mock("@/runtime/use-runtime-config", () => ({
 		isLoading: false,
 		isSaving: false,
 		refresh: vi.fn(),
-		save: vi.fn(async () => true),
+		save: runtimeConfigSaveMock,
 	}),
 }));
 
@@ -166,10 +167,17 @@ function findButtonByAriaLabel(container: ParentNode, ariaLabel: string): HTMLBu
 	) ?? null) as HTMLButtonElement | null;
 }
 
+function setInputValue(input: HTMLInputElement, value: string): void {
+	const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+	descriptor?.set?.call(input, value);
+	input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 const savedClineOauthConfig = {
 	selectedAgentId: "cline",
 	selectedShortcutLabel: null,
 	agentAutonomousModeEnabled: true,
+	agentCommandTimeoutSec: 300,
 	readyForReviewNotificationsEnabled: false,
 	effectiveCommand: "cline",
 	detectedCommands: [],
@@ -217,6 +225,8 @@ describe("RuntimeSettingsDialog", () => {
 
 	beforeEach(() => {
 		resetLayoutCustomizationsMock.mockReset();
+		runtimeConfigSaveMock.mockReset();
+		runtimeConfigSaveMock.mockResolvedValue(true);
 		clineSetupSectionOnSavedRef.onSaved = null;
 		window.localStorage.clear();
 		document.documentElement.removeAttribute("data-theme");
@@ -364,6 +374,43 @@ describe("RuntimeSettingsDialog", () => {
 		expect(handleOpenChange).toHaveBeenCalledWith(false);
 		expect(window.localStorage.getItem("kanban.theme")).toBe("graphite");
 		expect(document.documentElement.getAttribute("data-theme")).toBe("graphite");
+	});
+
+	it("surfaces and saves the native agent command timeout", async () => {
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={savedClineOauthConfig}
+					onOpenChange={() => {}}
+				/>,
+			);
+		});
+
+		const timeoutInput = document.getElementById("runtime-settings-command-timeout") as HTMLInputElement | null;
+		expect(timeoutInput).toBeInstanceOf(HTMLInputElement);
+		expect(timeoutInput?.value).toBe("300");
+
+		await act(async () => {
+			if (timeoutInput) {
+				setInputValue(timeoutInput, "900");
+			}
+		});
+
+		const saveButton = findButtonByText(document.body, "Save");
+		expect(saveButton).toBeInstanceOf(HTMLButtonElement);
+		expect(saveButton?.disabled).toBe(false);
+
+		await act(async () => {
+			saveButton?.click();
+		});
+
+		expect(runtimeConfigSaveMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentCommandTimeoutSec: 900,
+			}),
+		);
 	});
 
 	it("forwards cline setup saves to the dialog onSaved callback", async () => {

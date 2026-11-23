@@ -6,6 +6,11 @@ import * as RadixPopover from "@radix-ui/react-popover";
 import * as RadixSelect from "@radix-ui/react-select";
 import * as RadixSwitch from "@radix-ui/react-switch";
 import { getRuntimeAgentCatalogEntry, getRuntimeLaunchSupportedAgentCatalog } from "@runtime-agent-catalog";
+import {
+	DEFAULT_AGENT_COMMAND_TIMEOUT_SEC,
+	MAX_AGENT_COMMAND_TIMEOUT_SEC,
+	MIN_AGENT_COMMAND_TIMEOUT_SEC,
+} from "@runtime-contract";
 import { areRuntimeProjectShortcutsEqual } from "@runtime-shortcuts";
 import {
 	Bell,
@@ -83,6 +88,13 @@ function buildDisplayedAgentCommand(agentId: RuntimeAgentId, binary: string, aut
 
 function normalizeTemplateForComparison(value: string): string {
 	return value.replaceAll("\r\n", "\n").trim();
+}
+
+function clampAgentCommandTimeoutSec(value: number): number {
+	if (!Number.isFinite(value)) {
+		return DEFAULT_AGENT_COMMAND_TIMEOUT_SEC;
+	}
+	return Math.min(MAX_AGENT_COMMAND_TIMEOUT_SEC, Math.max(MIN_AGENT_COMMAND_TIMEOUT_SEC, Math.round(value)));
 }
 
 const GIT_PROMPT_VARIANT_OPTIONS: Array<{ value: TaskGitAction; label: string }> = [
@@ -368,6 +380,7 @@ export function RuntimeSettingsDialog({
 	const { resetLayoutCustomizations } = useLayoutCustomizations();
 	const [selectedAgentId, setSelectedAgentId] = useState<RuntimeAgentId>("claude");
 	const [agentAutonomousModeEnabled, setAgentAutonomousModeEnabled] = useState(true);
+	const [agentCommandTimeoutSec, setAgentCommandTimeoutSec] = useState(DEFAULT_AGENT_COMMAND_TIMEOUT_SEC);
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
 	const [initialThemeId, setInitialThemeId] = useState<ThemeId>(readStoredThemeId);
 	const [draftThemeId, setDraftThemeId] = useState<ThemeId>(readStoredThemeId);
@@ -402,6 +415,7 @@ export function RuntimeSettingsDialog({
 	const selectedPromptPlaceholder =
 		selectedPromptVariant === "commit" ? "Commit prompt template" : "PR prompt template";
 	const bypassPermissionsCheckboxId = "runtime-settings-bypass-permissions";
+	const commandTimeoutInputId = "runtime-settings-command-timeout";
 	const refreshNotificationPermission = useCallback(() => {
 		setNotificationPermission(getBrowserNotificationPermission());
 	}, []);
@@ -441,6 +455,7 @@ export function RuntimeSettingsDialog({
 	const fallbackAgentId = firstInstalledAgentId ?? displayedAgents[0]?.id ?? "claude";
 	const initialSelectedAgentId = configuredAgentId ?? fallbackAgentId;
 	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
+	const initialAgentCommandTimeoutSec = config?.agentCommandTimeoutSec ?? DEFAULT_AGENT_COMMAND_TIMEOUT_SEC;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
 	const initialShortcuts = config?.shortcuts ?? [];
 	const initialCommitPromptTemplate = config?.commitPromptTemplate ?? "";
@@ -465,6 +480,9 @@ export function RuntimeSettingsDialog({
 			return true;
 		}
 		if (agentAutonomousModeEnabled !== initialAgentAutonomousModeEnabled) {
+			return true;
+		}
+		if (agentCommandTimeoutSec !== initialAgentCommandTimeoutSec) {
 			return true;
 		}
 		if (readyForReviewNotificationsEnabled !== initialReadyForReviewNotificationsEnabled) {
@@ -494,12 +512,14 @@ export function RuntimeSettingsDialog({
 		);
 	}, [
 		agentAutonomousModeEnabled,
+		agentCommandTimeoutSec,
 		clineMcpSettings.hasUnsavedChanges,
 		clineSettings.hasUnsavedChanges,
 		commitPromptTemplate,
 		config,
 		draftThemeId,
 		initialAgentAutonomousModeEnabled,
+		initialAgentCommandTimeoutSec,
 		initialCommitPromptTemplate,
 		initialOpenPrPromptTemplate,
 		initialReadyForReviewNotificationsEnabled,
@@ -518,6 +538,7 @@ export function RuntimeSettingsDialog({
 		}
 		setSelectedAgentId(configuredAgentId ?? fallbackAgentId);
 		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
+		setAgentCommandTimeoutSec(config?.agentCommandTimeoutSec ?? DEFAULT_AGENT_COMMAND_TIMEOUT_SEC);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
 		setShortcuts(config?.shortcuts ?? []);
 		setCommitPromptTemplate(config?.commitPromptTemplate ?? "");
@@ -525,6 +546,7 @@ export function RuntimeSettingsDialog({
 		setSaveError(null);
 	}, [
 		config?.agentAutonomousModeEnabled,
+		config?.agentCommandTimeoutSec,
 		config?.commitPromptTemplate,
 		config?.openPrPromptTemplate,
 		config?.readyForReviewNotificationsEnabled,
@@ -700,6 +722,7 @@ export function RuntimeSettingsDialog({
 		const saved = await save({
 			selectedAgentId,
 			agentAutonomousModeEnabled,
+			agentCommandTimeoutSec: clampAgentCommandTimeoutSec(agentCommandTimeoutSec),
 			readyForReviewNotificationsEnabled,
 			shortcuts,
 			commitPromptTemplate,
@@ -812,6 +835,36 @@ export function RuntimeSettingsDialog({
 						<p className="text-text-secondary text-[13px] ml-6 mt-0 mb-0">
 							Allows agents to use tools without stopping for permission. Use at your own risk.
 						</p>
+						{selectedAgentId === "cline" ? (
+							<div className="mt-3">
+								<label
+									htmlFor={commandTimeoutInputId}
+									className="flex items-center gap-2 text-[13px] text-text-primary"
+								>
+									<span>Command timeout (seconds)</span>
+									<input
+										id={commandTimeoutInputId}
+										type="number"
+										min={MIN_AGENT_COMMAND_TIMEOUT_SEC}
+										max={MAX_AGENT_COMMAND_TIMEOUT_SEC}
+										step={1}
+										value={agentCommandTimeoutSec}
+										disabled={controlsDisabled}
+										onChange={(event) => {
+											const parsed = Number(event.target.value);
+											if (Number.isFinite(parsed)) {
+												setAgentCommandTimeoutSec(parsed);
+											}
+										}}
+										className="h-7 w-20 rounded-md border border-border bg-surface-2 px-2 text-xs text-text-primary focus:border-border-focus focus:outline-none disabled:cursor-default disabled:opacity-40"
+									/>
+								</label>
+								<p className="text-text-secondary text-[13px] ml-6 mt-1 mb-0">
+									Native Cline agents stop a foreground "run_commands" call after this timeout. Raise it for
+									long test suites, or start very long runs detached and poll their log instead.
+								</p>
+							</div>
+						) : null}
 					</div>
 
 					{/* ---- Cline ---- */}
