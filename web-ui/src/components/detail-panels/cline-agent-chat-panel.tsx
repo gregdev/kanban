@@ -2,7 +2,7 @@
 // Rendering lives here, while session state and action wiring come from the
 // controller hook so multiple surfaces can share the same behavior.
 
-import { AlertTriangle, Play } from "lucide-react";
+import { AlertTriangle, ArrowDown, Play } from "lucide-react";
 import React, {
 	type ReactElement,
 	useCallback,
@@ -12,7 +12,7 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import { ClineChatComposer } from "@/components/detail-panels/cline-chat-composer";
 import { ClineChatMessageItem } from "@/components/detail-panels/cline-chat-message-item";
@@ -25,6 +25,7 @@ import { ClineThinkingIndicator } from "@/components/detail-panels/cline-thinkin
 import { Button } from "@/components/ui/button";
 import { Link } from "@/components/ui/link";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useClineChatPanelController } from "@/hooks/use-cline-chat-panel-controller";
 import type { ClineChatActionResult } from "@/hooks/use-cline-chat-runtime-actions";
 import type { ClineChatMessage } from "@/hooks/use-cline-chat-session";
@@ -199,6 +200,8 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			return persistedMode ?? summary?.mode ?? defaultMode;
 		});
 		const [draftImages, setDraftImages] = useState<TaskImage[]>([]);
+		const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+		const [isAtBottom, setIsAtBottom] = useState(true);
 		const clineSettings = useRuntimeSettingsClineController({
 			open: true,
 			workspaceId,
@@ -251,6 +254,16 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 		useEffect(() => {
 			setComposerError(null);
 		}, [taskId]);
+
+		useEffect(() => {
+			setIsAtBottom(true);
+		}, [taskId]);
+
+		// Virtuoso renders the footer inside the scroller, so scrolling to the last item with
+		// `align: "end"` is what lands on the true bottom (it adds the footer height).
+		const handleScrollToBottom = useCallback(() => {
+			virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "smooth" });
+		}, []);
 
 		useEffect(() => {
 			const persistedMode = modeByTaskIdRef.current.get(taskId);
@@ -408,23 +421,41 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 						No session transcript was recorded for this task.
 					</p>
 				) : (
-					<Virtuoso
-						key={taskId}
-						className="min-h-0 min-w-0 flex-1"
-						style={{ height: "100%" }}
-						data={messages}
-						initialTopMostItemIndex={messages.length > 0 ? messages.length - 1 : 0}
-						computeItemKey={(_, message) => message.id}
-						itemContent={(_, message) => (
-							<div className="px-2 py-1">
-								<ClineChatMessageItem message={message} />
+					<div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+						<Virtuoso
+							ref={virtuosoRef}
+							key={taskId}
+							className="min-h-0 min-w-0 flex-1"
+							style={{ height: "100%" }}
+							data={messages}
+							initialTopMostItemIndex={messages.length > 0 ? messages.length - 1 : 0}
+							computeItemKey={(_, message) => message.id}
+							itemContent={(_, message) => (
+								<div className="px-2 py-1">
+									<ClineChatMessageItem message={message} />
+								</div>
+							)}
+							followOutput
+							atBottomThreshold={BOTTOM_LOCK_THRESHOLD_PX}
+							atBottomStateChange={setIsAtBottom}
+							context={{ showAgentProgressIndicator, isCreditLimitNoticeVisible }}
+							components={{ Footer: ChatFooter }}
+						/>
+						{!isAtBottom ? (
+							<div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2">
+								<Tooltip side="top" content="Scroll to bottom">
+									<Button
+										variant="default"
+										size="sm"
+										className="pointer-events-auto h-7 w-7 rounded-full p-0 shadow-lg"
+										aria-label="Scroll to bottom"
+										icon={<ArrowDown size={14} />}
+										onClick={handleScrollToBottom}
+									/>
+								</Tooltip>
 							</div>
-						)}
-						followOutput
-						atBottomThreshold={BOTTOM_LOCK_THRESHOLD_PX}
-						context={{ showAgentProgressIndicator, isCreditLimitNoticeVisible }}
-						components={{ Footer: ChatFooter }}
-					/>
+						) : null}
+					</div>
 				)}
 				{panelError ? (
 					<div className="border-t border-status-red/30 bg-status-red/10 px-2 py-2 text-xs text-status-red">

@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import React, { act, createRef, type ReactElement } from "react";
+import React, { act, createRef, forwardRef, type ReactElement, useImperativeHandle } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,30 +13,39 @@ const virtuosoLastProps = vi.hoisted(() => ({
 	current: null as {
 		followOutput?: boolean | string;
 		atBottomThreshold?: number;
+		atBottomStateChange?: (atBottom: boolean) => void;
 	} | null,
 }));
 
+const virtuosoScrollToIndexMock = vi.hoisted(() => vi.fn());
+
 vi.mock("react-virtuoso", () => ({
-	Virtuoso: ({
-		data,
-		itemContent,
-		components,
-		context,
-		className,
-		style,
-		followOutput,
-		atBottomThreshold,
-	}: {
-		data: unknown[];
-		itemContent: (index: number, item: unknown) => React.ReactNode;
-		components?: { Footer?: React.ComponentType<{ context?: unknown }> };
-		context?: unknown;
-		className?: string;
-		style?: React.CSSProperties;
-		followOutput?: boolean | string;
-		atBottomThreshold?: number;
-	}) => {
-		virtuosoLastProps.current = { followOutput, atBottomThreshold };
+	Virtuoso: forwardRef(function MockVirtuoso(
+		{
+			data,
+			itemContent,
+			components,
+			context,
+			className,
+			style,
+			followOutput,
+			atBottomThreshold,
+			atBottomStateChange,
+		}: {
+			data: unknown[];
+			itemContent: (index: number, item: unknown) => React.ReactNode;
+			components?: { Footer?: React.ComponentType<{ context?: unknown }> };
+			context?: unknown;
+			className?: string;
+			style?: React.CSSProperties;
+			followOutput?: boolean | string;
+			atBottomThreshold?: number;
+			atBottomStateChange?: (atBottom: boolean) => void;
+		},
+		ref,
+	) {
+		virtuosoLastProps.current = { followOutput, atBottomThreshold, atBottomStateChange };
+		useImperativeHandle(ref, () => ({ scrollToIndex: virtuosoScrollToIndexMock }));
 		return (
 			<div className={`overflow-y-auto ${className ?? ""}`} style={style}>
 				{data.map((item, index) => (
@@ -45,7 +54,7 @@ vi.mock("react-virtuoso", () => ({
 				{components?.Footer ? <components.Footer context={context} /> : null}
 			</div>
 		);
-	},
+	}),
 }));
 
 function createSummary(
@@ -110,6 +119,7 @@ describe("ClineAgentChatPanel", () => {
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		virtuosoLastProps.current = null;
+		virtuosoScrollToIndexMock.mockClear();
 		resetWorkspaceMetadataStore();
 		container = document.createElement("div");
 		document.body.appendChild(container);
@@ -1320,5 +1330,44 @@ describe("ClineAgentChatPanel", () => {
 		expect(container.textContent).toContain("Rename the config flag");
 		expect(container.textContent).not.toContain("No session transcript was recorded for this task.");
 		expect(virtuosoLastProps.current?.followOutput).toBe(true);
+	});
+
+	it("offers a scroll-to-bottom button only while the transcript is scrolled up", async () => {
+		const messages: ClineChatMessage[] = [
+			{ id: "assistant-1", role: "assistant", content: "First reply", createdAt: 1 },
+		];
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel taskId="task-1" summary={null} onLoadMessages={async () => messages} />,
+			);
+			await Promise.resolve();
+		});
+
+		// The scroller starts pinned to the bottom, so there is nothing to jump back to yet.
+		expect(container.querySelector('[aria-label="Scroll to bottom"]')).toBeNull();
+
+		await act(async () => {
+			virtuosoLastProps.current?.atBottomStateChange?.(false);
+		});
+
+		const scrollToBottomButton = container.querySelector<HTMLButtonElement>('[aria-label="Scroll to bottom"]');
+		expect(scrollToBottomButton).toBeInstanceOf(HTMLButtonElement);
+		if (!(scrollToBottomButton instanceof HTMLButtonElement)) {
+			throw new Error("Expected the scroll-to-bottom button");
+		}
+
+		await act(async () => {
+			scrollToBottomButton.click();
+		});
+
+		expect(virtuosoScrollToIndexMock).toHaveBeenCalledWith({ index: "LAST", align: "end", behavior: "smooth" });
+
+		await act(async () => {
+			virtuosoLastProps.current?.atBottomStateChange?.(true);
+		});
+
+		expect(container.querySelector('[aria-label="Scroll to bottom"]')).toBeNull();
 	});
 });
