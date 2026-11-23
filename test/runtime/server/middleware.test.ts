@@ -1,10 +1,22 @@
 import type { IncomingMessage } from "node:http";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { evaluateCors, evaluateHost, handleSocketUpgrade } from "../../../src/server/middleware";
+import { DEFAULT_KANBAN_RUNTIME_PORT, getKanbanRuntimeOrigin } from "../../../src/core/runtime-endpoint";
+import { evaluateCors, evaluateHost, getAllowedHostHeaders, handleSocketUpgrade } from "../../../src/server/middleware";
 
-const ALLOWED_ORIGIN = "http://127.0.0.1:3484";
-const ALLOWED_HOSTS = new Set(["localhost:3484", "127.0.0.1:3484"]);
+// Arbitrary fixture values for the pure gate functions. `handleSocketUpgrade`
+// below exercises the real middleware, so it derives its values from the
+// runtime endpoint instead of assuming the default port.
+const ALLOWED_ORIGIN = `http://127.0.0.1:${DEFAULT_KANBAN_RUNTIME_PORT}`;
+const ALLOWED_HOSTS = new Set([`localhost:${DEFAULT_KANBAN_RUNTIME_PORT}`, `127.0.0.1:${DEFAULT_KANBAN_RUNTIME_PORT}`]);
+
+function firstAllowedHostHeader(): string {
+	const [host] = [...getAllowedHostHeaders()];
+	if (!host) {
+		throw new Error("Expected at least one allowed runtime host header.");
+	}
+	return host;
+}
 
 function makeFakeRequest(headers: Partial<IncomingMessage["headers"]>, method = "GET"): IncomingMessage {
 	return { method, headers } as IncomingMessage;
@@ -132,7 +144,10 @@ describe("evaluateHost", () => {
 describe("handleSocketUpgrade", () => {
 	it("passes through upgrades whose Host and Origin are both allowed", () => {
 		const socket = new PassThrough();
-		const request = makeFakeRequest({ host: "127.0.0.1:3484", origin: ALLOWED_ORIGIN });
+		const request = makeFakeRequest({
+			host: firstAllowedHostHeader(),
+			origin: getKanbanRuntimeOrigin(),
+		});
 		const result = handleSocketUpgrade(request, socket);
 		expect(result).toEqual({ end: false });
 		expect(socket.destroyed).toBe(false);
@@ -144,7 +159,10 @@ describe("handleSocketUpgrade", () => {
 		socket.on("data", (chunk) => {
 			written.push(chunk as Buffer);
 		});
-		const request = makeFakeRequest({ host: "127.0.0.1:3484", origin: "http://evil.example.com" });
+		const request = makeFakeRequest({
+			host: firstAllowedHostHeader(),
+			origin: "http://evil.example.com",
+		});
 		const result = handleSocketUpgrade(request, socket);
 		expect(result).toEqual({ end: true });
 		expect(socket.destroyed).toBe(true);
@@ -153,7 +171,10 @@ describe("handleSocketUpgrade", () => {
 
 	it("rejects upgrades whose Host header doesn't match the allowlist", () => {
 		const socket = new PassThrough();
-		const request = makeFakeRequest({ host: "attacker.example.com:3484", origin: ALLOWED_ORIGIN });
+		const request = makeFakeRequest({
+			host: `attacker.example.com:${DEFAULT_KANBAN_RUNTIME_PORT}`,
+			origin: getKanbanRuntimeOrigin(),
+		});
 		const result = handleSocketUpgrade(request, socket);
 		expect(result).toEqual({ end: true });
 		expect(socket.destroyed).toBe(true);
