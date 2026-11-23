@@ -2,7 +2,7 @@
 // Rendering lives here, while session state and action wiring come from the
 // controller hook so multiple surfaces can share the same behavior.
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Play } from "lucide-react";
 import React, {
 	type ReactElement,
 	useCallback,
@@ -84,6 +84,8 @@ export interface ClineAgentChatPanelProps {
 		options?: { mode?: RuntimeTaskSessionMode; images?: TaskImage[] },
 	) => Promise<ClineChatActionResult>;
 	onCancelTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
+	/** Explicitly resume a turn that stopped mid-flight (`error` / `interrupted`). */
+	onResumeTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
 	onLoadMessages?: (taskId: string) => Promise<ClineChatMessage[] | null>;
 	incomingMessages?: ClineChatMessage[] | null;
 	incomingMessage?: ClineChatMessage | null;
@@ -115,6 +117,7 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			onTaskClineSettingsChanged,
 			onSendMessage,
 			onCancelTurn,
+			onResumeTurn,
 			onLoadMessages,
 			incomingMessages,
 			incomingMessage,
@@ -138,6 +141,8 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			isSending,
 			canSend,
 			canCancel,
+			canResumeTurn,
+			isResuming,
 			showReviewActions,
 			showAgentProgressIndicator,
 			showActionFooter,
@@ -145,6 +150,7 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			handleSendText,
 			handleSendDraft,
 			handleCancelTurn,
+			handleResumeTurn,
 		} = useClineChatPanelController({
 			taskId,
 			workspaceId,
@@ -152,6 +158,7 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			taskColumnId,
 			onSendMessage,
 			onCancelTurn,
+			onResumeTurn,
 			onLoadMessages,
 			incomingMessages,
 			incomingMessage,
@@ -427,6 +434,20 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 				{panelError ? (
 					<div className="border-t border-status-red/30 bg-status-red/10 px-2 py-2 text-xs text-status-red">
 						{panelError}
+					</div>
+				) : null}
+				{canResumeTurn ? (
+					<div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-status-orange/40 bg-status-orange/10 px-3 py-2 text-xs text-status-orange">
+						<span className="min-w-0">This turn stopped before it finished.</span>
+						<Button
+							variant="primary"
+							size="sm"
+							icon={isResuming ? <Spinner size={12} /> : <Play size={14} />}
+							disabled={isResuming}
+							onClick={handleResumeTurn}
+						>
+							Resume turn
+						</Button>
 					</div>
 				) : null}
 				<div className="px-2 py-3">

@@ -1122,6 +1122,18 @@ export const runtimeTaskChatCancelResponseSchema = z.object({
 });
 export type RuntimeTaskChatCancelResponse = z.infer<typeof runtimeTaskChatCancelResponseSchema>;
 
+export const runtimeTaskChatResumeRequestSchema = z.object({
+	taskId: z.string(),
+});
+export type RuntimeTaskChatResumeRequest = z.infer<typeof runtimeTaskChatResumeRequestSchema>;
+
+export const runtimeTaskChatResumeResponseSchema = z.object({
+	ok: z.boolean(),
+	summary: runtimeTaskSessionSummarySchema.nullable(),
+	error: z.string().optional(),
+});
+export type RuntimeTaskChatResumeResponse = z.infer<typeof runtimeTaskChatResumeResponseSchema>;
+
 export const runtimeShellSessionStartRequestSchema = z.object({
 	taskId: z.string(),
 	cols: z.number().int().positive().optional(),

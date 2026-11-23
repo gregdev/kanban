@@ -22,6 +22,7 @@ import {
 	type RuntimeTaskChatCancelRequest,
 	type RuntimeTaskChatMessagesRequest,
 	type RuntimeTaskChatReloadRequest,
+	type RuntimeTaskChatResumeRequest,
 	type RuntimeTaskChatSendRequest,
 	type RuntimeTaskSessionInputRequest,
 	type RuntimeTaskSessionStartRequest,
@@ -54,6 +55,7 @@ import {
 	runtimeTaskChatCancelRequestSchema,
 	runtimeTaskChatMessagesRequestSchema,
 	runtimeTaskChatReloadRequestSchema,
+	runtimeTaskChatResumeRequestSchema,
 	runtimeTaskChatSendRequestSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionStartRequestSchema,
@@ -311,6 +313,17 @@ export function parseTaskChatReloadRequest(value: unknown): RuntimeTaskChatReloa
 
 export function parseTaskChatCancelRequest(value: unknown): RuntimeTaskChatCancelRequest {
 	const parsed = parseWithSchema(runtimeTaskChatCancelRequestSchema, value);
+	const taskId = parsed.taskId.trim();
+	if (!taskId) {
+		throw new Error("Task chat taskId cannot be empty.");
+	}
+	return {
+		taskId,
+	};
+}
+
+export function parseTaskChatResumeRequest(value: unknown): RuntimeTaskChatResumeRequest {
+	const parsed = parseWithSchema(runtimeTaskChatResumeRequestSchema, value);
 	const taskId = parsed.taskId.trim();
 	if (!taskId) {
 		throw new Error("Task chat taskId cannot be empty.");

@@ -43,6 +43,13 @@ import {
 	updateSummary,
 } from "./cline-session-state";
 import {
+	CLINE_RESUME_TURN_INSTRUCTION,
+	CLINE_RESUME_TURN_SYSTEM_MESSAGE,
+	canResumeClineTurn,
+	isMissingLiveClineSessionError,
+	resolveClineTurnResumeRefusal,
+} from "./cline-turn-resume";
+import {
 	type ClineRuntimeSetupLease,
 	type ClineWatcherRegistry,
 	createClineWatcherRegistry,
@@ -79,6 +86,14 @@ export interface StartClineTaskSessionRequest {
 	systemPrompt?: string | null;
 }
 
+export type ClineTaskTurnResumeOutcome = "resumed" | "already_running" | "not_found" | "not_resumable" | "refused";
+
+export interface ClineTaskTurnResumeResult {
+	outcome: ClineTaskTurnResumeOutcome;
+	summary: RuntimeTaskSessionSummary | null;
+	error?: string;
+}
+
 export interface ClineTaskSessionService {
 	onSummary(listener: (summary: RuntimeTaskSessionSummary) => void): () => void;
 	onMessage(listener: (taskId: string, message: ClineTaskMessage) => void): () => void;
@@ -86,6 +101,7 @@ export interface ClineTaskSessionService {
 	stopTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
 	abortTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
 	cancelTaskTurn(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
+	resumeTaskTurn(taskId: string): Promise<ClineTaskTurnResumeResult>;
 	sendTaskSessionInput(
 		taskId: string,
 		text: string,
@@ -215,7 +231,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 	private emitTaskFailure(
 		taskId: string,
 		entry: ClineTaskSessionEntry,
-		context: "start" | "send",
+		context: "start" | "send" | "resume",
 		error: unknown,
 	): void {
 		const errorMessage = toErrorMessage(error);
@@ -237,7 +253,7 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 			lastHookAt: now(),
 			warningMessage: creditLimitError ? null : errorMessage,
 			latestHookActivity: {
-				activityText: `${context === "start" ? "Start" : "Send"} failed: ${errorMessage}`,
+				activityText: `${context === "start" ? "Start" : context === "send" ? "Send" : "Resume"} failed: ${errorMessage}`,
 				toolName: null,
 				toolInputSummary: null,
 				finalMessage: errorMessage,
@@ -574,6 +590,176 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		});
 		this.emitSummary(summary);
 		return summary;
+	}
+
+	// Explicit, single-shot recovery for a native Cline turn that died mid-flight.
+	// The SDK has no native resume API, so this rebinds the persisted session and
+	// sends one continuation instruction. It never re-adds the original user
+	// message and never re-sends already-applied tool results.
+	async resumeTaskTurn(taskId: string): Promise<ClineTaskTurnResumeResult> {
+		let entry = this.messageRepository.getTaskEntry(taskId);
+		if (!entry) {
+			const reboundSummary = await this.rebindPersistedTaskSession(taskId);
+			if (!reboundSummary) {
+				return {
+					outcome: "not_found",
+					summary: null,
+					error: "This task has no Cline session to resume.",
+				};
+			}
+			entry = this.messageRepository.getTaskEntry(taskId);
+			if (!entry) {
+				return {
+					outcome: "not_found",
+					summary: reboundSummary,
+					error: "This task has no Cline session to resume.",
+				};
+			}
+		}
+
+		if (entry.summary.state === "running") {
+			return {
+				outcome: "already_running",
+				summary: cloneSummary(entry.summary),
+			};
+		}
+
+		if (!canResumeClineTurn(entry.summary)) {
+			return {
+				outcome: "not_resumable",
+				summary: cloneSummary(entry.summary),
+				error: "Only interrupted turns or turns stopped by an error can be resumed.",
+			};
+		}
+
+		const refusal = resolveClineTurnResumeRefusal(entry.summary);
+		if (refusal) {
+			return {
+				outcome: "refused",
+				summary: cloneSummary(entry.summary),
+				error: refusal.message,
+			};
+		}
+
+		// A user-requested resume supersedes any pending cancellation.
+		this.pendingTurnCancelTaskIds.delete(taskId);
+
+		// Rebind to the latest persisted session before changing observable state
+		// so a task with nothing to resume fails without flapping the board.
+		const persistedSnapshot = await this.sessionRuntime.resumeTaskSession(taskId).catch(() => null);
+		if (!persistedSnapshot && !this.sessionRuntime.getTaskSessionId(taskId)) {
+			return {
+				outcome: "not_found",
+				summary: cloneSummary(entry.summary),
+				error: "This task has no Cline session to resume.",
+			};
+		}
+
+		clearActiveTurnState(entry);
+		const systemMessage = createMessage(taskId, "system", CLINE_RESUME_TURN_SYSTEM_MESSAGE);
+		entry.messages.push(systemMessage);
+		this.emitMessage(taskId, systemMessage);
+
+		const effectiveMode: RuntimeTaskSessionMode = entry.summary.mode ?? "act";
+		const runningSummary = updateSummary(entry, {
+			state: "running",
+			mode: effectiveMode,
+			reviewReason: null,
+			warningMessage: null,
+			lastOutputAt: now(),
+			lastHookAt: now(),
+			latestHookActivity: {
+				activityText: "Resuming interrupted turn",
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: null,
+				hookEventName: "turn_start",
+				notificationType: null,
+				source: "cline-sdk",
+			},
+		});
+		this.emitSummary(runningSummary);
+
+		const assistantCountBeforeResume = entry.messages.filter((message) => message.role === "assistant").length;
+		void (async () => {
+			try {
+				const result = await this.dispatchResumeTurn({
+					taskId,
+					mode: effectiveMode,
+					persistedMessages: persistedSnapshot?.messages,
+				});
+				const agentText = readAgentResultText(result);
+				if (agentText) {
+					const assistantCountAfterResume = entry.messages.filter(
+						(message) => message.role === "assistant",
+					).length;
+					if (assistantCountAfterResume <= assistantCountBeforeResume) {
+						const agentMessage =
+							setOrCreateAssistantMessage(entry, taskId, agentText) ??
+							createAssistantMessage(entry, taskId, agentText);
+						this.emitMessage(taskId, agentMessage);
+					}
+				}
+				// `done`/`ended` events normally drive the terminal transition. If a
+				// host returns the result inline without them, never leave the board
+				// stuck on `running`.
+				if (entry.summary.state === "running") {
+					clearActiveTurnState(entry);
+					this.emitSummary(
+						updateSummary(entry, {
+							state: "awaiting_review",
+							reviewReason: null,
+							warningMessage: null,
+							lastOutputAt: now(),
+							lastHookAt: now(),
+						}),
+					);
+				}
+			} catch (error) {
+				this.emitTaskFailure(taskId, entry, "resume", error);
+			}
+		})();
+
+		return {
+			outcome: "resumed",
+			summary: cloneSummary(entry.summary),
+		};
+	}
+
+	private async dispatchResumeTurn(input: {
+		taskId: string;
+		mode: RuntimeTaskSessionMode;
+		persistedMessages?: ClineSdkPersistedMessage[];
+	}): Promise<unknown> {
+		try {
+			const resumed = await this.sessionRuntime.resumeTaskTurn({
+				taskId: input.taskId,
+				prompt: CLINE_RESUME_TURN_INSTRUCTION,
+				mode: input.mode,
+			});
+			return resumed.result;
+		} catch (error) {
+			// A persisted session can outlive the live SDK host. Rebuild a live
+			// session from repaired persisted history exactly once; this is not a
+			// retry loop and the SDK still owns bounded retries for the new turn.
+			if (!isMissingLiveClineSessionError(error) || !this.sessionRuntime.canRestartTaskSession(input.taskId)) {
+				throw error;
+			}
+			const persistedMessages =
+				input.persistedMessages && input.persistedMessages.length > 0
+					? input.persistedMessages
+					: (await this.sessionRuntime.readPersistedTaskSession(input.taskId).catch(() => null))?.messages;
+			if (!persistedMessages || persistedMessages.length === 0) {
+				throw error;
+			}
+			const restarted = await this.sessionRuntime.restartTaskSession({
+				taskId: input.taskId,
+				prompt: CLINE_RESUME_TURN_INSTRUCTION,
+				mode: input.mode,
+				initialMessages: persistedMessages,
+			});
+			return restarted.result;
+		}
 	}
 
 	async sendTaskSessionInput(

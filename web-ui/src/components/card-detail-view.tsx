@@ -343,6 +343,7 @@ export function CardDetailView({
 	onSendReviewComments,
 	onSendClineChatMessage,
 	onCancelClineChatTurn,
+	onResumeClineChatTurn,
 	onLoadClineChatMessages,
 	latestClineChatMessage,
 	streamedClineChatMessages,
@@ -405,6 +406,7 @@ export function CardDetailView({
 		options?: { mode?: RuntimeTaskSessionMode },
 	) => Promise<ClineChatActionResult>;
 	onCancelClineChatTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
+	onResumeClineChatTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
 	onLoadClineChatMessages?: (taskId: string) => Promise<ClineChatMessage[] | null>;
 	latestClineChatMessage?: ClineChatMessage | null;
 	streamedClineChatMessages?: ClineChatMessage[] | null;
@@ -647,6 +649,7 @@ export function CardDetailView({
 			onTaskClineSettingsChanged={onTaskClineSettingsChanged}
 			onSendMessage={onSendClineChatMessage}
 			onCancelTurn={onCancelClineChatTurn}
+			onResumeTurn={onResumeClineChatTurn}
 			onLoadMessages={onLoadClineChatMessages}
 			incomingMessages={streamedClineChatMessages}
 			incomingMessage={latestClineChatMessage}

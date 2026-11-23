@@ -99,6 +99,20 @@ export interface ClinePersistedTaskSessionSnapshot {
 	messages: ClineSdkPersistedMessage[];
 }
 
+export interface ResumeClineTaskTurnRuntimeRequest {
+	taskId: string;
+	/** Explicit continuation instruction. Never the original user message. */
+	prompt: string;
+	mode?: RuntimeTaskSessionMode;
+	images?: RuntimeTaskImage[];
+	delivery?: "queue" | "steer";
+}
+
+export interface ResumeClineTaskTurnRuntimeResult {
+	sessionId: string;
+	result: unknown;
+}
+
 export interface ClineSessionRuntime {
 	startTaskSession(request: StartClineSessionRuntimeRequest): Promise<StartClineSessionRuntimeResult>;
 	restartTaskSession(input: {
@@ -116,6 +130,7 @@ export interface ClineSessionRuntime {
 		delivery?: "queue" | "steer",
 	): Promise<unknown>;
 	resumeTaskSession(taskId: string): Promise<ClinePersistedTaskSessionSnapshot | null>;
+	resumeTaskTurn(request: ResumeClineTaskTurnRuntimeRequest): Promise<ResumeClineTaskTurnRuntimeResult>;
 	stopTaskSession(taskId: string): Promise<void>;
 	abortTaskSession(taskId: string): Promise<void>;
 	clearTaskSessions(taskId: string): Promise<void>;
@@ -367,6 +382,29 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 			record,
 			messages,
 		};
+	}
+
+	// Single-shot resume of a dead turn: rebind the task to the persisted SDK
+	// session, then drive exactly one continuation turn through send().
+	async resumeTaskTurn(request: ResumeClineTaskTurnRuntimeRequest): Promise<ResumeClineTaskTurnRuntimeResult> {
+		const sessionHost = await this.ensureSessionHost();
+		const record = await this.findPersistedTaskSessionRecord(request.taskId, sessionHost);
+		const sessionId = record?.sessionId ?? this.sessionIdByTaskId.get(request.taskId) ?? null;
+		if (!sessionId) {
+			throw new Error(`No resumable Cline session for task ${request.taskId}.`);
+		}
+		this.bindTaskSession(request.taskId, sessionId);
+		if (request.mode) {
+			this.updateActiveSessionMode(sessionHost, sessionId, request.mode);
+			this.updateLastStartRequestMode(request.taskId, request.mode);
+		}
+		const result = await sessionHost.send({
+			sessionId,
+			prompt: request.prompt,
+			userImages: toSdkUserImages(request.images),
+			...(request.delivery ? { delivery: request.delivery } : {}),
+		});
+		return { sessionId, result };
 	}
 
 	async stopTaskSession(taskId: string): Promise<void> {

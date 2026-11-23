@@ -36,6 +36,7 @@ interface UseClineChatRuntimeActionsResult {
 	loadTaskChatMessages: (taskId: string) => Promise<RuntimeTaskChatMessage[] | null>;
 	abortTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 	cancelTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
+	resumeTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -132,10 +133,34 @@ export function useClineChatRuntimeActions({
 		[currentProjectId, onSessionSummary],
 	);
 
+	const resumeTaskChatTurn = useCallback(
+		async (taskId: string): Promise<ClineChatActionResult> => {
+			if (!currentProjectId) {
+				return { ok: false, message: "No project selected." };
+			}
+			try {
+				const payload = await getRuntimeTrpcClient(currentProjectId).runtime.resumeTaskChatTurn.mutate({
+					taskId,
+				});
+				if (!payload.ok) {
+					return { ok: false, message: payload.error ?? "Could not resume the interrupted turn." };
+				}
+				if (payload.summary) {
+					onSessionSummary?.(payload.summary);
+				}
+				return { ok: true };
+			} catch (error) {
+				return { ok: false, message: toErrorMessage(error) };
+			}
+		},
+		[currentProjectId, onSessionSummary],
+	);
+
 	return {
 		sendTaskChatMessage,
 		loadTaskChatMessages,
 		abortTaskChatTurn,
 		cancelTaskChatTurn,
+		resumeTaskChatTurn,
 	};
 }

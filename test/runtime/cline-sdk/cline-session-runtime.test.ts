@@ -941,6 +941,79 @@ describe("InMemoryClineSessionRuntime", () => {
 		});
 	});
 
+	it("resumes a dead turn by rebinding the persisted session and sending one continuation", async () => {
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({ text: "continued" })),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => [
+				createPersistedRecord({
+					sessionId: "task-1-persisted",
+					status: "failed",
+					startedAt: "2026-03-17T10:10:00.000Z",
+					updatedAt: "2026-03-17T10:15:00.000Z",
+				}),
+			]),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		const result = await runtime.resumeTaskTurn({
+			taskId: "task-1",
+			prompt: "Continue the interrupted turn.",
+			mode: "plan",
+		});
+
+		expect(result.sessionId).toBe("task-1-persisted");
+		expect(result.result).toEqual({ text: "continued" });
+		expect(runtime.getTaskSessionId("task-1")).toBe("task-1-persisted");
+		expect(fakeHost.send).toHaveBeenCalledWith({
+			sessionId: "task-1-persisted",
+			prompt: "Continue the interrupted turn.",
+			userImages: undefined,
+		});
+	});
+
+	it("refuses to resume when no live or persisted session exists", async () => {
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await expect(
+			runtime.resumeTaskTurn({ taskId: "task-1", prompt: "Continue the interrupted turn." }),
+		).rejects.toThrow("No resumable Cline session");
+		expect(fakeHost.send).not.toHaveBeenCalled();
+	});
+
 	it("disposes the shared host and clears task mappings", async () => {
 		const fakeHost = {
 			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({

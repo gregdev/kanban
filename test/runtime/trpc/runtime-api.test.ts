@@ -235,6 +235,10 @@ function createClineTaskSessionServiceMock() {
 		stopTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
 		abortTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
 		cancelTaskTurn: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
+		resumeTaskTurn: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
+			outcome: "not_found",
+			summary: null,
+		})),
 		sendTaskSessionInput: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
 		clearTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
 		reloadTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
@@ -1425,6 +1429,75 @@ describe("createRuntimeApi startTaskSession", () => {
 		);
 		expect(cancelResponse.ok).toBe(true);
 		expect(clineTaskSessionService.cancelTaskTurn).toHaveBeenCalledWith("task-1");
+	});
+
+	it("resumes a chat turn through the cline service", async () => {
+		const summary = createSummary({
+			agentId: "cline",
+			pid: null,
+			state: "running",
+			reviewReason: null,
+		});
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.resumeTaskTurn.mockResolvedValue({
+			outcome: "resumed",
+			summary,
+		});
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => ({}) as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.resumeTaskChatTurn(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1" },
+		);
+
+		expect(response).toEqual({
+			ok: true,
+			summary,
+		});
+		expect(clineTaskSessionService.resumeTaskTurn).toHaveBeenCalledWith("task-1");
+	});
+
+	it("surfaces a resume refusal without claiming success", async () => {
+		const summary = createSummary({
+			agentId: "cline",
+			pid: null,
+			state: "awaiting_review",
+			reviewReason: "error",
+		});
+		const clineTaskSessionService = createClineTaskSessionServiceMock();
+		clineTaskSessionService.resumeTaskTurn.mockResolvedValue({
+			outcome: "refused",
+			summary,
+			error: "This turn stopped because the Cline account ran out of credits. Add credits before resuming.",
+		});
+
+		const api = createTestRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => ({}) as never),
+			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.resumeTaskChatTurn(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1" },
+		);
+
+		expect(response.ok).toBe(false);
+		expect(response.summary).toEqual(summary);
+		expect(response.error).toContain("ran out of credits");
 	});
 
 	it("handles clear slash commands without sending them to the model", async () => {

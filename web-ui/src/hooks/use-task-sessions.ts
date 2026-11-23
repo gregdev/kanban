@@ -65,6 +65,7 @@ export interface UseTaskSessionsResult {
 	) => Promise<ClineChatActionResult>;
 	abortTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 	cancelTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
+	resumeTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
 	fetchTaskChatMessages: (taskId: string) => Promise<RuntimeTaskChatMessage[] | null>;
 	cleanupTaskWorkspace: (taskId: string) => Promise<RuntimeWorktreeDeleteResponse | null>;
 	fetchTaskWorkspaceInfo: (task: BoardCard) => Promise<RuntimeTaskWorkspaceInfoResponse | null>;
@@ -113,6 +114,7 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 		loadTaskChatMessages: fetchTaskChatMessages,
 		abortTaskChatTurn,
 		cancelTaskChatTurn,
+		resumeTaskChatTurn,
 	} = useClineChatRuntimeActions({
 		currentProjectId,
 		onSessionSummary: upsertSession,
@@ -292,6 +294,7 @@ export function useTaskSessions({ currentProjectId, setSessions }: UseTaskSessio
 		sendTaskChatMessage,
 		abortTaskChatTurn,
 		cancelTaskChatTurn,
+		resumeTaskChatTurn,
 		fetchTaskChatMessages,
 		cleanupTaskWorkspace,
 		fetchTaskWorkspaceInfo,

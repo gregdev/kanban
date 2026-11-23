@@ -54,6 +54,9 @@ type SendTaskSessionInputMock = Mock<
 		delivery?: "queue" | "steer",
 	) => Promise<unknown>
 >;
+type ResumeTaskTurnMock = Mock<
+	(request: { taskId: string; prompt: string; mode?: RuntimeTaskSessionMode }) => Promise<unknown>
+>;
 type StopTaskSessionMock = Mock<(taskId: string) => Promise<void>>;
 type AbortTaskSessionMock = Mock<(taskId: string) => Promise<void>>;
 type ClearTaskSessionsMock = Mock<(taskId: string) => Promise<void>>;
@@ -65,6 +68,7 @@ interface FakeClineSessionRuntimeController {
 	taskIdBySessionId: Map<string, string>;
 	startTaskSessionMock: StartTaskSessionMock;
 	sendTaskSessionInputMock: SendTaskSessionInputMock;
+	resumeTaskTurnMock: ResumeTaskTurnMock;
 	stopTaskSessionMock: StopTaskSessionMock;
 	abortTaskSessionMock: AbortTaskSessionMock;
 	clearTaskSessionsMock: ClearTaskSessionsMock;
@@ -123,6 +127,13 @@ function createFakeClineSessionRuntime(): FakeClineSessionRuntimeController {
 		}),
 	);
 	const sendTaskSessionInputMock: SendTaskSessionInputMock = vi.fn(async () => ({}));
+	const resumeTaskTurnMock: ResumeTaskTurnMock = vi.fn(async (request) => {
+		const sessionId = sessionIdByTaskId.get(request.taskId);
+		if (!sessionId) {
+			throw new Error(`No resumable Cline session for task ${request.taskId}.`);
+		}
+		return { text: "Resumed answer" };
+	});
 	const stopTaskSessionMock: StopTaskSessionMock = vi.fn(async () => {});
 	const abortTaskSessionMock: AbortTaskSessionMock = vi.fn(async () => {});
 	const clearTaskSessionsMock: ClearTaskSessionsMock = vi.fn(async (_taskId: string) => {});
@@ -203,6 +214,14 @@ function createFakeClineSessionRuntime(): FakeClineSessionRuntimeController {
 				}
 				return snapshot;
 			},
+			async resumeTaskTurn(request): Promise<{ sessionId: string; result: unknown }> {
+				const sessionId = sessionIdByTaskId.get(request.taskId);
+				if (!sessionId) {
+					throw new Error(`No resumable Cline session for task ${request.taskId}.`);
+				}
+				const result = await resumeTaskTurnMock(request);
+				return { sessionId, result };
+			},
 			async stopTaskSession(taskId: string): Promise<void> {
 				await stopTaskSessionMock(taskId);
 				clearTaskSessionBinding(taskId);
@@ -277,6 +296,7 @@ function createFakeClineSessionRuntime(): FakeClineSessionRuntimeController {
 		taskIdBySessionId,
 		startTaskSessionMock,
 		sendTaskSessionInputMock,
+		resumeTaskTurnMock,
 		stopTaskSessionMock,
 		abortTaskSessionMock,
 		clearTaskSessionsMock,
@@ -1567,6 +1587,157 @@ describe("InMemoryClineTaskSessionService", () => {
 		});
 		expect(runtime.sendTaskSessionInputMock).not.toHaveBeenCalled();
 		expect(service.listMessages("task-1").map((message) => message.content)).toContain("Try again");
+	});
+
+	it("resumes an errored turn without duplicating the original user message", async () => {
+		const { service, runtime } = createTrackedService();
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Initial prompt",
+		});
+		const sessionId = await waitForTaskSessionId(runtime, "task-1");
+
+		runtime.emitAgentEvent(sessionId, {
+			type: "error",
+			error: new Error("socket hang up"),
+			recoverable: false,
+			iteration: 1,
+		});
+		await vi.waitFor(() => {
+			expect(service.getSummary("task-1")?.state).toBe("awaiting_review");
+			expect(service.getSummary("task-1")?.reviewReason).toBe("error");
+		});
+
+		const result = await service.resumeTaskTurn("task-1");
+
+		expect(result.outcome).toBe("resumed");
+		expect(result.summary?.state).toBe("running");
+		expect(result.summary?.reviewReason).toBeNull();
+		await vi.waitFor(() => {
+			expect(runtime.resumeTaskTurnMock).toHaveBeenCalledTimes(1);
+		});
+		expect(runtime.resumeTaskTurnMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				taskId: "task-1",
+				prompt: expect.stringContaining("Continue the interrupted turn"),
+				mode: "act",
+			}),
+		);
+		// Only the original user prompt remains in the transcript; the resume
+		// instruction is not inserted as a user message.
+		expect(service.listMessages("task-1").filter((message) => message.role === "user")).toEqual([
+			expect.objectContaining({ content: "Initial prompt" }),
+		]);
+		expect(service.listMessages("task-1").some((message) => message.content === "Resuming interrupted turn")).toBe(
+			true,
+		);
+	});
+
+	it("does not resume a turn that is already running", async () => {
+		const { service, runtime } = createTrackedService();
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "",
+		});
+		await service.sendTaskSessionInput("task-1", "Keep going");
+		expect(service.getSummary("task-1")?.state).toBe("running");
+
+		const result = await service.resumeTaskTurn("task-1");
+
+		expect(result.outcome).toBe("already_running");
+		expect(result.summary?.state).toBe("running");
+		expect(runtime.resumeTaskTurnMock).not.toHaveBeenCalled();
+		expect(service.listMessages("task-1").some((message) => message.content === "Resuming interrupted turn")).toBe(
+			false,
+		);
+	});
+
+	it("refuses to resume turns stopped by credit exhaustion", async () => {
+		const { service, runtime } = createTrackedService();
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Initial prompt",
+		});
+		const sessionId = await waitForTaskSessionId(runtime, "task-1");
+
+		runtime.emitAgentEvent(sessionId, {
+			type: "error",
+			error: new Error("402 Insufficient balance. Your Cline Credits balance is $0.00"),
+			recoverable: false,
+			iteration: 1,
+		});
+		await vi.waitFor(() => {
+			expect(service.getSummary("task-1")?.latestHookActivity?.notificationType).toBe("credit_limit");
+		});
+
+		const result = await service.resumeTaskTurn("task-1");
+
+		expect(result.outcome).toBe("refused");
+		expect(result.error).toContain("credits");
+		expect(runtime.resumeTaskTurnMock).not.toHaveBeenCalled();
+		expect(service.listMessages("task-1").some((message) => message.content === "Resuming interrupted turn")).toBe(
+			false,
+		);
+	});
+
+	it("rebuilds a live session from persisted history when the runtime lost the session", async () => {
+		const { service, runtime } = createTrackedService();
+		await service.startTaskSession({
+			taskId: "task-1",
+			cwd: "/tmp/worktree",
+			prompt: "Initial prompt",
+		});
+		const sessionId = await waitForTaskSessionId(runtime, "task-1");
+		runtime.emitAgentEvent(sessionId, {
+			type: "run-failed",
+			error: new Error("runtime host crashed"),
+		});
+		await vi.waitFor(() => {
+			expect(service.getSummary("task-1")?.state).toBe("awaiting_review");
+		});
+
+		runtime.readPersistedTaskSessionMock.mockResolvedValue({
+			record: {
+				sessionId: "task-1-persisted",
+				source: "core" as ClinePersistedTaskSessionSnapshot["record"]["source"],
+				status: "failed",
+				startedAt: "2026-03-17T10:00:00.000Z",
+				updatedAt: "2026-03-17T10:05:00.000Z",
+				interactive: true,
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				cwd: "/tmp/worktree",
+				workspaceRoot: "/tmp/workspace-root",
+				enableTools: true,
+				enableSpawn: false,
+				enableTeams: false,
+				isSubagent: false,
+			},
+			messages: [
+				{ role: "user", content: "Initial prompt" },
+				{ role: "assistant", content: "Partial answer" },
+			],
+		});
+		runtime.resumeTaskTurnMock.mockRejectedValueOnce(new Error("session not found: task-1-persisted"));
+
+		const result = await service.resumeTaskTurn("task-1");
+
+		expect(result.outcome).toBe("resumed");
+		await vi.waitFor(() => {
+			expect(runtime.startTaskSessionMock).toHaveBeenCalledTimes(2);
+		});
+		const restartRequest = runtime.startTaskSessionMock.mock.calls[1]?.[0];
+		expect(restartRequest?.prompt).toContain("Continue the interrupted turn");
+		expect(restartRequest?.initialMessages).toEqual([
+			{ role: "user", content: "Initial prompt" },
+			{ role: "assistant", content: "Partial answer" },
+		]);
+		expect(service.listMessages("task-1").filter((message) => message.role === "user")).toEqual([
+			expect.objectContaining({ content: "Initial prompt" }),
+		]);
 	});
 
 	it("compacts persisted history and retries send when context window is exceeded", async () => {

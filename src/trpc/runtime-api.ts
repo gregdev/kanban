@@ -36,6 +36,7 @@ import {
 	parseTaskChatCancelRequest,
 	parseTaskChatMessagesRequest,
 	parseTaskChatReloadRequest,
+	parseTaskChatResumeRequest,
 	parseTaskChatSendRequest,
 	parseTaskSessionInputRequest,
 	parseTaskSessionStartRequest,
@@ -500,6 +501,31 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				return {
 					ok: true,
 					summary,
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					ok: false,
+					summary: null,
+					error: message,
+				};
+			}
+		},
+		resumeTaskChatTurn: async (workspaceScope, input) => {
+			try {
+				const body = parseTaskChatResumeRequest(input);
+				const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
+				const result = await clineTaskSessionService.resumeTaskTurn(body.taskId);
+				if (result.outcome === "resumed" || result.outcome === "already_running") {
+					return {
+						ok: true,
+						summary: result.summary,
+					};
+				}
+				return {
+					ok: false,
+					summary: result.summary,
+					error: result.error ?? "Could not resume the interrupted turn.",
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

@@ -350,6 +350,117 @@ describe("ClineAgentChatPanel", () => {
 		});
 	});
 
+	it("offers a resume action for a turn stopped by an error", async () => {
+		const onResumeTurn = vi.fn(async () => ({ ok: true }));
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("awaiting_review", null, { reviewReason: "error" })}
+					onLoadMessages={async () => []}
+					onResumeTurn={onResumeTurn}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		const resumeButton = Array.from(container.querySelectorAll("button")).find((button) =>
+			button.textContent?.includes("Resume turn"),
+		);
+		expect(resumeButton).toBeInstanceOf(HTMLButtonElement);
+		if (!(resumeButton instanceof HTMLButtonElement)) {
+			throw new Error("Expected resume turn button");
+		}
+
+		await act(async () => {
+			resumeButton.click();
+			await Promise.resolve();
+		});
+
+		expect(onResumeTurn).toHaveBeenCalledWith("task-1");
+	});
+
+	it("offers a resume action for an interrupted turn", async () => {
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("interrupted", null, { reviewReason: "interrupted" })}
+					onLoadMessages={async () => []}
+					onResumeTurn={async () => ({ ok: true })}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		expect(container.textContent).toContain("Resume turn");
+	});
+
+	it("does not offer resume while the turn is running or for attention-only reviews", async () => {
+		const onResumeTurn = vi.fn(async () => ({ ok: true }));
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("running", null, { reviewReason: "error" })}
+					onLoadMessages={async () => []}
+					onResumeTurn={onResumeTurn}
+				/>,
+			);
+			await Promise.resolve();
+		});
+		expect(container.textContent).not.toContain("Resume turn");
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("awaiting_review", null, { reviewReason: "attention" })}
+					onLoadMessages={async () => []}
+					onResumeTurn={onResumeTurn}
+				/>,
+			);
+			await Promise.resolve();
+		});
+		expect(container.textContent).not.toContain("Resume turn");
+	});
+
+	it("hides resume when the turn stopped on a credit-limit error", async () => {
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary(
+						"awaiting_review",
+						{
+							activityText: "Agent error: 402 Insufficient balance",
+							toolName: null,
+							toolInputSummary: null,
+							finalMessage: "402 Insufficient balance. Your Cline Credits balance is $0.00",
+							hookEventName: "agent_error",
+							notificationType: "credit_limit",
+							source: "cline-sdk",
+						},
+						{ reviewReason: "error" },
+					)}
+					onLoadMessages={async () => []}
+					onResumeTurn={async () => ({ ok: true })}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		expect(container.textContent).not.toContain("Resume turn");
+		expect(container.textContent).toContain("Out of Cline credits");
+	});
+
 	it("renders user message images inline without a task header", async () => {
 		await act(async () => {
 			renderPanel(

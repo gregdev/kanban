@@ -198,6 +198,7 @@ export default function App(): ReactElement {
 		sendTaskSessionInput,
 		sendTaskChatMessage,
 		cancelTaskChatTurn,
+		resumeTaskChatTurn,
 		fetchTaskChatMessages,
 		cleanupTaskWorkspace,
 		fetchTaskWorkspaceInfo,
@@ -1066,6 +1067,7 @@ export default function App(): ReactElement {
 									}}
 									onSendClineChatMessage={sendTaskChatMessage}
 									onCancelClineChatTurn={cancelTaskChatTurn}
+									onResumeClineChatTurn={resumeTaskChatTurn}
 									onLoadClineChatMessages={fetchTaskChatMessages}
 									latestClineChatMessage={latestSelectedTaskChatMessage}
 									streamedClineChatMessages={selectedTaskChatMessages}
