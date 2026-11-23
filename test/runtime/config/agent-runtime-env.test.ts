@@ -30,7 +30,7 @@ describe("normalizeAgentPathPrepend", () => {
 	});
 
 	it("expands unbraced and braced HOME tokens", () => {
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: config input, not a template
+		// oxlint-disable-next-line eslint/no-template-curly-in-string -- config input, not a template
 		const entries = ["$HOME/tools", "/opt/${HOME}/nested"];
 		expect(normalizeAgentPathPrepend(entries, { homeDir: "/home/tester" })).toEqual([
 			"/home/tester/tools",
@@ -93,7 +93,10 @@ describe("applyAgentRuntimeEnv", () => {
 	it("collapses a Windows-style Path key into PATH when prepending", () => {
 		setPlatform("win32");
 		const baseEnv: NodeJS.ProcessEnv = { Path: ["C:\\Windows", "C:\\Tools"].join(";") };
-		const env = applyAgentRuntimeEnv(baseEnv, { agentEnv: {}, agentPathPrepend: ["C:\\Agent\\bin"] });
+		const env = applyAgentRuntimeEnv(baseEnv, {
+			agentEnv: {},
+			agentPathPrepend: ["C:\\Agent\\bin"],
+		});
 		expect(env.Path).toBeUndefined();
 		// The host's path.delimiter is used, so the inherited entry stays intact as one value.
 		expect(env.PATH).toBe(["C:\\Agent\\bin", "C:\\Windows;C:\\Tools"].join(delimiter));

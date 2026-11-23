@@ -586,6 +586,7 @@ export function runPendingAutoUpdateOnShutdown(options?: {
 	const pendingUpdate = pendingShutdownAutoUpdate;
 	pendingShutdownAutoUpdate = null;
 
+	// oxlint-disable-next-line eslint/no-console -- fallback logger when the caller supplies none
 	const log = options?.log ?? console.log;
 	log(`New version ${pendingUpdate.latestVersion} detected. Refreshing cached Kanban for next launch.`);
 

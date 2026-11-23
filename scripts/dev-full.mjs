@@ -1,6 +1,6 @@
 /**
  * Starts both the runtime server and Vite web UI dev server on an
- * automatically-selected free port. Use via `npm run dev:full` or the
+ * automatically-selected free port. Use via `pnpm run dev:full` or the
  * VS Code "Dev (Full Stack)" launch config.
  */
 import { createServer, connect } from "node:net";
@@ -9,21 +9,23 @@ import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
 const isWindows = process.platform === "win32";
+const pnpmBinary = isWindows ? "pnpm.cmd" : "pnpm";
 
 async function ensureDependenciesInstalled() {
-	const lockIndicator = join(process.cwd(), "node_modules", ".package-lock.json");
+	const lockIndicator = join(process.cwd(), "node_modules", ".modules.yaml");
 	try {
 		await access(lockIndicator);
 		return;
 	} catch {
 		// node_modules is missing; fall through to install below.
 	}
-	console.warn("node_modules not installed in this worktree. Running npm ci...");
-	for (const args of [["ci"], ["--prefix", "web-ui", "ci"]]) {
-		const result = spawnSync("npm", args, { stdio: "inherit", shell: isWindows });
-		if (result.status !== 0) {
-			process.exit(result.status ?? 1);
-		}
+	console.warn("node_modules not installed in this worktree. Running pnpm install...");
+	const result = spawnSync(pnpmBinary, ["install"], {
+		stdio: "inherit",
+		shell: isWindows,
+	});
+	if (result.status !== 0) {
+		process.exit(result.status ?? 1);
 	}
 }
 
@@ -126,7 +128,7 @@ try {
 	cleanup(1);
 }
 
-vite = spawn("npm", ["run", "web:dev"], {
+vite = spawn(pnpmBinary, ["run", "web:dev"], {
 	env,
 	stdio: "inherit",
 	shell: isWindows,

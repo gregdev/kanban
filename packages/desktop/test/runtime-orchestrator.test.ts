@@ -1480,7 +1480,7 @@ describe("RuntimeOrchestrator dispose() vs late crash events", () => {
 		);
 		// And the error is *actionable* — it names the remediation path.
 		await expect(orchestrator.connect()).rejects.toThrow(
-			/npm run stage:cli/,
+			/pnpm run stage:cli/,
 		);
 		// No child was spawned (no FakeChildManager was constructed since
 		// the `new RuntimeChildManager(...)` line is past the validation).

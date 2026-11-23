@@ -2,7 +2,7 @@
   "shortcuts": [
     {
       "label": "Run",
-      "command": "npm run dogfood",
+      "command": "pnpm run dogfood",
       "icon": "play"
     },
     {

@@ -20,7 +20,7 @@ const stageDir = resolve(desktopRoot, "cli");
 function fail(message) {
 	console.error(`\n[stage:cli] ERROR: ${message}\n`);
 	console.error("[stage:cli] Run the root build first:");
-	console.error("[stage:cli]   (cd ../.. && npm run build)\n");
+	console.error("[stage:cli]   (cd ../.. && pnpm run build)\n");
 	process.exit(1);
 }
 

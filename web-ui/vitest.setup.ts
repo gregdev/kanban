@@ -8,11 +8,11 @@ const hasWorkingLocalStorage = (): boolean => {
 		const storage = globalThis.localStorage as Partial<Storage> | undefined;
 		return Boolean(
 			storage &&
-				typeof storage.getItem === "function" &&
-				typeof storage.setItem === "function" &&
-				typeof storage.removeItem === "function" &&
-				typeof storage.clear === "function" &&
-				typeof storage.key === "function",
+			typeof storage.getItem === "function" &&
+			typeof storage.setItem === "function" &&
+			typeof storage.removeItem === "function" &&
+			typeof storage.clear === "function" &&
+			typeof storage.key === "function",
 		);
 	} catch {
 		return false;

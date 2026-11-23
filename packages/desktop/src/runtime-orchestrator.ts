@@ -380,7 +380,7 @@ export class RuntimeOrchestrator extends EventEmitter<RuntimeOrchestratorEventMa
 		if (!existsSync(resolved)) {
 			throw new Error(
 				`CLI shim not found at ${resolved}. ` +
-					`In dev, run \`npm run stage:cli\` to populate build/bin/. ` +
+					`In dev, run \`pnpm run stage:cli\` to populate build/bin/. ` +
 					`In packaged builds, this indicates a corrupted install — ` +
 					`expected the shim under Resources/bin/.`,
 			);

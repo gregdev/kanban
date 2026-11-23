@@ -29,11 +29,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
+          cache: pnpm
 
       # macOS node-gyp/electron rebuilds can fail with Python 3.12/distutils; pin 3.11.
       - name: Setup Python (for node-gyp on macOS)
@@ -43,38 +46,35 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Install web-ui dependencies
-        run: npm ci --prefix web-ui
-
-      - name: Install packages/desktop dependencies
-        run: npm ci --prefix packages/desktop
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
       - name: Lint
-        run: npm run lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
 
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Root unit tests
-        run: npm run test:fast
+        run: pnpm run test:fast
 
       # Integration tests spawn real CLI/server subprocesses and boot a fresh
       # process per scenario (~2s each), so they are slow and CPU-hungry by
       # design. They run here in CI rather than on pre-commit (`test:precommit`
       # is alias for `test:fast`) to keep local commits fast.
       - name: Integration tests (CI only)
-        run: npm run test:integration
+        run: pnpm run test:integration
 
       - name: Web UI tests
-        run: npm --prefix web-ui run test
+        run: pnpm run web:test
 
       - name: packages/desktop typecheck
-        run: npm --prefix packages/desktop run typecheck
+        run: pnpm --filter @kanban/desktop run typecheck
 
       - name: packages/desktop tests
-        run: npm --prefix packages/desktop test
+        run: pnpm --filter @kanban/desktop test

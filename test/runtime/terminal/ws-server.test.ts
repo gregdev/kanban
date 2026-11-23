@@ -61,13 +61,11 @@ class FakeTerminalManager implements TerminalSessionService {
 		};
 	}
 
-	getRestoreSnapshot = vi.fn(
-		async (): Promise<TerminalRestoreSnapshot> => ({
-			snapshot: "",
-			cols: 80,
-			rows: 24,
-		}),
-	);
+	getRestoreSnapshot = vi.fn(async (): Promise<TerminalRestoreSnapshot> => ({
+		snapshot: "",
+		cols: 80,
+		rows: 24,
+	}));
 	recoverStaleSession = vi.fn(() => createSummary());
 	writeInput = vi.fn(() => createSummary());
 	resize = vi.fn(() => true);

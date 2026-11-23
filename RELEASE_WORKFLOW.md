@@ -62,7 +62,7 @@ Given the input tag, the workflow:
 3. Validates tag format (`vX.Y.Z` with optional prerelease suffix).
 4. Runs the reusable test workflow (`test.yml`).
 5. Verifies `tag == v${package.json version}`.
-6. Runs `npm run prepublishOnly`.
+6. Runs `pnpm run prepublishOnly`.
    - This runs build + checks before publish.
 7. Publishes with:
 

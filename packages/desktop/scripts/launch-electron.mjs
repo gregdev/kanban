@@ -55,7 +55,7 @@ child.on("close", (code, signal) => {
 		// having successfully exited with code 1. Without this, Ctrl-C
 		// in a `make` recipe would not abort the recipe (make treats
 		// exit-1 as a build failure but specifically distinguishes it
-		// from signal-termination), and `npm run` would not propagate
+		// from signal-termination), and `pnpm run` would not propagate
 		// the SIGINT to its own parent. We have to first remove our
 		// own signal handlers — Node disables the default
 		// signal-exit-with-128+N behavior as soon as a handler is

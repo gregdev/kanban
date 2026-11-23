@@ -23,14 +23,12 @@ function createDefaultDeps(serverCwd: string): CreateProjectsApiDependencies {
 		resolveProjectInputPath: vi.fn((inputPath: string, cwd: string) => resolve(cwd, inputPath)),
 		assertPathIsDirectory: vi.fn(async () => {}),
 		hasGitRepository: vi.fn(() => false),
-		summarizeProjectTaskCounts: vi.fn(
-			async (): Promise<RuntimeProjectTaskCounts> => ({
-				backlog: 0,
-				in_progress: 0,
-				review: 0,
-				trash: 0,
-			}),
-		),
+		summarizeProjectTaskCounts: vi.fn(async (): Promise<RuntimeProjectTaskCounts> => ({
+			backlog: 0,
+			in_progress: 0,
+			review: 0,
+			trash: 0,
+		})),
 		createProjectSummary: vi.fn(() => ({
 			id: "test",
 			path: "/test",

@@ -225,7 +225,7 @@ export function appendReasoningChunk(entry: ClineTaskSessionEntry, taskId: strin
 			...currentMessage,
 			content: `${currentMessage.content}${chunk}`,
 			meta: {
-				...(currentMessage.meta ?? {}),
+				...currentMessage.meta,
 				hookEventName: "reasoning_delta",
 				streamType: "reasoning",
 			},
@@ -249,7 +249,7 @@ export function setOrCreateReasoningMessage(
 		...currentMessage,
 		content,
 		meta: {
-			...(currentMessage.meta ?? {}),
+			...currentMessage.meta,
 			hookEventName: "reasoning_end",
 			streamType: "reasoning",
 		},
@@ -338,7 +338,7 @@ export function finishToolCallMessage(
 			...currentMessage,
 			content,
 			meta: {
-				...(currentMessage.meta ?? {}),
+				...currentMessage.meta,
 				toolName: input.toolName,
 				hookEventName: "tool_call_end",
 				toolCallId: input.toolCallId,

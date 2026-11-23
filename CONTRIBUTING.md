@@ -43,19 +43,19 @@ PRs without a corresponding issue may be closed.
 
 2. Install dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. Run the dev server:
    ```bash
-   npm run dev        # Backend watch mode
-   npm run web:dev    # Frontend Vite dev server (in a separate terminal)
+   pnpm run dev        # Backend watch mode
+   pnpm run web:dev    # Frontend Vite dev server (in a separate terminal)
    ```
 
 4. Before submitting a PR, make sure both of these pass locally:
    ```bash
-   npm run check      # Lint + typecheck + tests
-   npm run build      # Full production build
+   pnpm run check      # Lint + format check + typecheck + tests
+   pnpm run build      # Full production build
    ```
 
 ## Writing and Submitting Code
@@ -67,8 +67,8 @@ PRs without a corresponding issue may be closed.
    - No inline or dynamic imports. Use standard top-level imports.
    - Write production-quality code, not prototypes.
 
-3. Add tests for your changes. Run `npm run test:all` to verify everything (including the
-   slower integration suite) passes; `npm run test` runs only the fast unit tests.
+3. Add tests for your changes. Run `pnpm run test:all` to verify everything (including the
+   slower integration suite) passes; `pnpm run test` runs only the fast unit tests.
 
 4. Use [conventional commit](https://www.conventionalcommits.org/) format for commit messages (e.g., `fix(terminal):`, `feat(agents):`, `test:`). Reference the issue number with `fixes #123` or `closes #123` when applicable.
 

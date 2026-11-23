@@ -1,0 +1,29 @@
+{
+	"useTabs": true,
+	"tabWidth": 3,
+	"printWidth": 120,
+	"singleQuote": false,
+	"jsxSingleQuote": false,
+	"quoteProps": "as-needed",
+	"trailingComma": "all",
+	"semi": true,
+	"arrowParens": "always",
+	"bracketSameLine": false,
+	"bracketSpacing": true,
+	"sortPackageJson": false,
+	// Only first-party JS/TS is formatted. Markdown, CSS, JSON and YAML keep
+	// their own conventions (2-space, hand-tuned) so a stray `oxfmt .` never
+	// churns non-code files.
+	"ignorePatterns": [
+		"dist/**/*",
+		"node_modules/**/*",
+		".worktrees/**/*",
+		"coverage/**/*",
+		"**/*.md",
+		"**/*.css",
+		"**/*.json",
+		"**/*.jsonc",
+		"**/*.yml",
+		"**/*.yaml"
+	]
+}

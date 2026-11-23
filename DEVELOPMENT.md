@@ -2,13 +2,13 @@
 
 ## Requirements
 
-- Node.js 20+
-- npm 10+
+- Node.js 22.12+
+- pnpm 12+
 
 ## Install
 
 ```bash
-npm run install:all
+pnpm install
 ```
 
 ## Hot reload workflow
@@ -16,7 +16,7 @@ npm run install:all
 Fast path:
 
 ```bash
-npm run dev:full
+pnpm run dev:full
 ```
 
 - Starts the runtime in watch mode and the Vite web UI dev server together
@@ -28,7 +28,7 @@ Manual equivalent in two terminals:
 1. Runtime server (API + PTY agent runtime):
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 - Runs on `http://127.0.0.1:3484`
@@ -36,7 +36,7 @@ npm run dev
 2. Web UI (Vite HMR):
 
 ```bash
-npm run web:dev
+pnpm run web:dev
 ```
 
 - Runs on `http://127.0.0.1:4173`
@@ -46,25 +46,25 @@ Use `http://127.0.0.1:4173` while developing UI so changes hot reload.
 
 ## Choose the right workflow
 
-Use `npm run dev:full` when you are actively developing Kanban and want fast iteration. It runs the source checkout with `tsx watch` plus the Vite web UI dev server, so runtime changes reload and web UI changes get HMR.
+Use `pnpm run dev:full` when you are actively developing Kanban and want fast iteration. It runs the source checkout with `tsx watch` plus the Vite web UI dev server, so runtime changes reload and web UI changes get HMR.
 
 By default, `dev:full` now starts Kanban with `--skip-shutdown-cleanup` so stopping a debug/dev instance does not move cards to Trash or delete task worktrees from your active boards.
 
 To opt back into shutdown cleanup while using `dev:full`, run:
 
 ```bash
-npm run dev:full -- --with-shutdown-cleanup
+pnpm run dev:full -- --with-shutdown-cleanup
 ```
 
-If `node_modules` has not been installed in this worktree, `dev:full` auto-runs `npm ci` before launch.
+If `node_modules` has not been installed in this worktree, `dev:full` auto-runs `pnpm install` before launch.
 
-Use `npm run dogfood` when you want to validate the latest built CLI behavior more realistically. It builds the current checkout and launches `dist/cli.js`, which is better for checking packaged behavior, startup and shutdown flows, multi-instance dogfooding, and launch behavior against a target project.
+Use `pnpm run dogfood` when you want to validate the latest built CLI behavior more realistically. It builds the current checkout and launches `dist/cli.js`, which is better for checking packaged behavior, startup and shutdown flows, multi-instance dogfooding, and launch behavior against a target project.
 
 ## VS Code F5 debugging
 
 The repo includes `.vscode/launch.json` with two configurations:
 
-- `Dev (Full Stack)`: Launches the same workflow as `npm run dev:full`, starting both the runtime and Vite in one terminal.
+- `Dev (Full Stack)`: Launches the same workflow as `pnpm run dev:full`, starting both the runtime and Vite in one terminal.
 - `Run Tests`: Runs `vitest run` with the debugger so you can set breakpoints in tests.
 
 Shutdown cleanup flags:
@@ -74,7 +74,7 @@ Shutdown cleanup flags:
 ## Build and run packaged CLI
 
 ```bash
-npm run build
+pnpm run build
 node dist/cli.js
 ```
 
@@ -98,7 +98,7 @@ Run your stable orchestrator first (main checkout):
 
 ```bash
 cd /path/to/kanban-main
-npm run build
+pnpm run build
 node dist/cli.js --port 3484
 ```
 
@@ -106,13 +106,13 @@ Then run a test checkout against a target project (feature worktree):
 
 ```bash
 cd /path/to/kanban-feature-worktree
-npm run dogfood -- --project /path/to/target/repo --port auto
+pnpm run dogfood -- --project /path/to/target/repo --port auto
 ```
 
 If `--project` is omitted, the launcher starts Kanban from a non-git cwd so runtime behaves like launching outside a git repo and opens the first indexed project (if any):
 
 ```bash
-npm run dogfood -- --port auto
+pnpm run dogfood -- --port auto
 ```
 
 Dogfood launcher behavior:
@@ -129,7 +129,7 @@ Dogfood launcher behavior:
 After cloning and installing dependencies, create/update the global CLI link from this repo:
 
 ```bash
-npm run link
+pnpm run link
 ```
 
 Verify:
@@ -146,31 +146,31 @@ cd /path/to/your/project
 kanban
 ```
 
-After local code changes, run `npm run build` again before using the linked command.
+After local code changes, run `pnpm run build` again before using the linked command.
 
-When switching between worktrees, re-run `npm run link` from the worktree you want to test so the global `kanban` binary points at the right `dist/cli.js`. For sidebar agent automation guidance, inspect `src/prompts/append-system-prompt.ts`.
+When switching between worktrees, re-run `pnpm run link` from the worktree you want to test so the global `kanban` binary points at the right `dist/cli.js`. For sidebar agent automation guidance, inspect `src/prompts/append-system-prompt.ts`.
 
 Remove the global link:
 
 ```bash
-npm run unlink
+pnpm run unlink
 ```
 
 ## Scripts
 
-- `npm run build`: build runtime and bundled web UI into `dist`
-- `npm run dogfood -- [--project <path>] [--port <number|auto>] [--no-open] [--skip-build]`: build and launch this checkout, optionally targeting a specific project path
-- `npm run dev`: run CLI in watch mode
-- `npm run dev:full`: run the runtime watch server and Vite web UI dev server together
-- `npm run web:dev`: run web UI dev server
-- `npm run web:build`: build web UI
-- `npm run typecheck`: typecheck runtime
-- `npm run web:typecheck`: typecheck web UI
-- `npm run test`: run runtime unit tests (fast; skips `test/integration`)
-- `npm run test:all`: run every root test, including integration tests
-- `npm run test:integration`: run only the integration tests (also run in CI)
-- `npm run web:test`: run web UI tests
-- `npm run check`: lint, typecheck, and the full root test suite
+- `pnpm run build`: build runtime and bundled web UI into `dist`
+- `pnpm run dogfood -- [--project <path>] [--port <number|auto>] [--no-open] [--skip-build]`: build and launch this checkout, optionally targeting a specific project path
+- `pnpm run dev`: run CLI in watch mode
+- `pnpm run dev:full`: run the runtime watch server and Vite web UI dev server together
+- `pnpm run web:dev`: run web UI dev server
+- `pnpm run web:build`: build web UI
+- `pnpm run typecheck`: typecheck runtime
+- `pnpm run web:typecheck`: typecheck web UI
+- `pnpm run test`: run runtime unit tests (fast; skips `test/integration`)
+- `pnpm run test:all`: run every root test, including integration tests
+- `pnpm run test:integration`: run only the integration tests (also run in CI)
+- `pnpm run web:test`: run web UI tests
+- `pnpm run check`: lint, format check, typecheck, and the full root test suite
 
 ## Tests
 

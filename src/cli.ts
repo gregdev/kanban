@@ -473,6 +473,7 @@ async function startServer(): Promise<{
 		import("./server/workspace-registry.js"),
 		import("./update/update.js"),
 	]);
+	// oxlint-disable-next-line eslint/prefer-const -- the hub is assigned after createWorkspaceRegistry may call back
 	let runtimeStateHub: RuntimeStateHub | undefined;
 	const workspaceRegistry = await createWorkspaceRegistry({
 		cwd: process.cwd(),

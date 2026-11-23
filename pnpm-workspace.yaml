@@ -1,0 +1,41 @@
+# pnpm workspace root. Settings that used to live in the `pnpm` field of
+# package.json (or in per-package `overrides` / `allowScripts`) now belong
+# here — pnpm 12 no longer reads that field.
+
+packages:
+  - "web-ui"
+  - "packages/*"
+
+# Security pins applied to the whole workspace. Kept merged from the three
+# former npm installs (root, web-ui, packages/desktop), so a single lockfile
+# enforces them everywhere.
+#
+# `esbuild` is intentionally NOT overridden: root and packages/desktop pin
+# ^0.28.x while Vite carries its own ^0.25.x. pnpm's isolated store lets both
+# coexist, which is safer than forcing one version across the workspace.
+overrides:
+  protobufjs: ">=7.6.1 <8"
+  # Must stay on 3.x: simple-git 4.x dropped the default export that
+  # @clinebot/core imports.
+  simple-git: ">=3.36.0 <4"
+  fast-uri: ">=3.1.5 <4"
+  hono: ">=4.12.34 <5"
+  "@hono/node-server": ">=1.14.0 <2"
+  "nanoid@>=5.0.0 <6": ">=5.1.16 <6"
+  "nanoid@<4": ">=3.3.18 <4"
+  js-yaml: ">=4.3.1 <5"
+  postcss: ">=8.5.23 <9"
+  ws: ">=8.21.0 <9"
+  dompurify: ">=3.4.13 <4"
+  undici: ">=6.27.0 <7"
+
+# Dependencies allowed to run install scripts. Replaces the per-package
+# `allowScripts` blocks, which pnpm ignores.
+allowBuilds:
+  "@sentry/cli": true
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  node-pty: true
+  protobufjs: true

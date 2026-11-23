@@ -2,15 +2,21 @@
 
 STAGED_FILES=$(git diff --cached --name-only)
 
-echo "Running biome check on staged files..."
-npx biome check --staged --no-errors-on-unmatched --files-ignore-unknown=true
+echo "Running oxfmt and oxlint..."
+pnpm run format:check
 if [ $? -ne 0 ]; then
-	echo "Biome check failed."
+	echo "Format check failed. Run 'pnpm run format' to fix."
+	exit 1
+fi
+
+pnpm run lint
+if [ $? -ne 0 ]; then
+	echo "Lint failed."
 	exit 1
 fi
 
 echo "Running type checking and fast tests..."
-npm run typecheck && npm run test:precommit
+pnpm run typecheck && pnpm run test:precommit
 if [ $? -ne 0 ]; then
 	echo "Checks failed."
 	exit 1

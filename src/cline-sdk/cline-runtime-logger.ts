@@ -69,8 +69,8 @@ export function createKanbanClineLogger(bindings?: Record<string, unknown>): Bas
 		const mergedMetadata =
 			bindings || metadata
 				? {
-						...(bindings ?? {}),
-						...(metadata ?? {}),
+						...bindings,
+						...metadata,
 					}
 				: undefined;
 		writeLogLine(level, message, mergedMetadata);

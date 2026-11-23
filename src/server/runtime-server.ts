@@ -106,7 +106,7 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 	try {
 		await readFile(join(webUiDir, "index.html"));
 	} catch {
-		throw new Error("Could not find web UI assets. Run `npm run build` to generate and package the web UI.");
+		throw new Error("Could not find web UI assets. Run `pnpm run build` to generate and package the web UI.");
 	}
 
 	const resolveWorkspaceScopeFromRequest = async (

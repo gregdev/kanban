@@ -20,9 +20,7 @@ describe("text drafts", () => {
 		writeTextDraft(DRAFT_KEY, "Investigate the flaky test");
 
 		expect(readTextDraft(DRAFT_KEY)).toBe("Investigate the flaky test");
-		expect(
-			readTextDraft(createTextDraftKey({ kind: "agent-chat", workspaceId: "ws-1", taskId: "task-2" })),
-		).toBe("");
+		expect(readTextDraft(createTextDraftKey({ kind: "agent-chat", workspaceId: "ws-1", taskId: "task-2" }))).toBe("");
 	});
 
 	it("removes the stored entry when the draft is cleared", () => {

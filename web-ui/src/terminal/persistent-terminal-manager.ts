@@ -99,7 +99,7 @@ function decodeTerminalSocketChunk(decoder: TextDecoder, data: string | ArrayBuf
 	return "";
 }
 
-function getTerminalSocketWriteData(data: string | ArrayBuffer | Blob): string | Uint8Array | null {
+function getTerminalSocketWriteData(data: string | ArrayBuffer | Blob): string | Uint8Array<ArrayBuffer> | null {
 	if (typeof data === "string") {
 		return data;
 	}
@@ -387,7 +387,7 @@ class PersistentTerminal {
 		this.controlSocket.send(JSON.stringify(message));
 	}
 
-	private sendIoData(data: string | Uint8Array): boolean {
+	private sendIoData(data: string | Uint8Array<ArrayBuffer>): boolean {
 		if (!this.ioSocket || this.ioSocket.readyState !== WebSocket.OPEN) {
 			return false;
 		}

@@ -74,8 +74,7 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 			const preferredWorkspaceScope = preferredWorkspaceId
 				? await loadWorkspaceScopeById(preferredWorkspaceId)
 				: null;
-			const resolveBasePath =
-				preferredWorkspaceScope?.repoPath ?? deps.getActiveWorkspacePath() ?? process.cwd();
+			const resolveBasePath = preferredWorkspaceScope?.repoPath ?? deps.getActiveWorkspacePath() ?? process.cwd();
 			try {
 				let projectPath: string;
 				if (body.gitUrl) {

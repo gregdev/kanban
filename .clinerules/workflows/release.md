@@ -97,7 +97,7 @@ Wait for their answer.
 
 Update `package.json` version field to the new version.
 
-Run `npm install --package-lock-only` to sync `package-lock.json`.
+Run `pnpm install --lockfile-only` to sync `pnpm-lock.yaml`.
 
 Create or prepend to `CHANGELOG.md`. The format must match what `.github/scripts/extract-changelog-entry.mjs` expects:
 
@@ -113,7 +113,7 @@ If `CHANGELOG.md` already exists, prepend the new section after any top-level he
 ### 7. Commit and tag
 
 ```bash
-git add CHANGELOG.md package.json package-lock.json
+git add CHANGELOG.md package.json pnpm-lock.yaml
 git commit -m "v<version> release notes"
 git tag v<version>
 ```

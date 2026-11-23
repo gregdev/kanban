@@ -240,7 +240,7 @@ function logLiteLlmModelListWarning(message: string, metadata?: Record<string, u
 	LOGGER.log(message, {
 		severity: "warn",
 		providerId: "litellm",
-		...(metadata ?? {}),
+		...metadata,
 	});
 }
 
@@ -249,7 +249,7 @@ function hasAuthorizationHeader(headers: Record<string, string>): boolean {
 }
 
 function resolveLiteLlmModelListHeaders(settings: SdkProviderSettings): Record<string, string> {
-	const headers = { ...(settings.headers ?? {}) };
+	const headers = { ...settings.headers };
 	const apiKey = resolveVisibleApiKey(settings);
 	if (apiKey && !hasAuthorizationHeader(headers)) {
 		headers.Authorization = `Bearer ${apiKey}`;
@@ -437,7 +437,7 @@ async function refreshManagedOauthSettings(
 	const nextSettings: SdkProviderSettings = {
 		...settings,
 		auth: {
-			...(settings.auth ?? {}),
+			...settings.auth,
 			accessToken: toProviderApiKey(providerId, nextCredentials.access),
 			refreshToken: nextCredentials.refresh,
 			accountId: nextCredentials.accountId ?? undefined,
@@ -1041,7 +1041,7 @@ export function createClineProviderService() {
 			}
 
 			if (input.reasoningEffort !== undefined) {
-				const nextReasoning = { ...(nextSettings.reasoning ?? {}) };
+				const nextReasoning = { ...nextSettings.reasoning };
 				if (input.reasoningEffort) {
 					nextReasoning.effort = input.reasoningEffort;
 				} else {
@@ -1068,7 +1068,7 @@ export function createClineProviderService() {
 			}
 
 			if (input.aws !== undefined) {
-				const nextAws = { ...(nextSettings.aws ?? {}) } as NonNullable<SdkProviderSettings["aws"]>;
+				const nextAws = { ...nextSettings.aws } as NonNullable<SdkProviderSettings["aws"]>;
 				if (input.aws.accessKey !== undefined) {
 					const accessKey = input.aws.accessKey?.trim() ?? "";
 					if (accessKey) nextAws.accessKey = accessKey;
@@ -1125,7 +1125,7 @@ export function createClineProviderService() {
 			}
 
 			if (input.gcp !== undefined) {
-				const nextGcp = { ...(nextSettings.gcp ?? {}) } as NonNullable<SdkProviderSettings["gcp"]>;
+				const nextGcp = { ...nextSettings.gcp } as NonNullable<SdkProviderSettings["gcp"]>;
 				if (input.gcp.projectId !== undefined) {
 					const projectId = input.gcp.projectId?.trim() ?? "";
 					if (projectId) nextGcp.projectId = projectId;
@@ -1189,7 +1189,7 @@ export function createClineProviderService() {
 					...existingSettings,
 					provider: input.providerId,
 					auth: {
-						...(existingSettings.auth ?? {}),
+						...existingSettings.auth,
 						accessToken: toProviderApiKey(input.providerId, credentials.access),
 						refreshToken: credentials.refresh,
 						accountId: credentials.accountId ?? undefined,
@@ -1257,7 +1257,7 @@ export function createClineProviderService() {
 					...existingSettings,
 					provider: providerId,
 					auth: {
-						...(existingSettings.auth ?? {}),
+						...existingSettings.auth,
 						accessToken: toProviderApiKey(providerId, credentials.access),
 						refreshToken: credentials.refresh,
 						accountId: credentials.accountId ?? undefined,
