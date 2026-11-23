@@ -567,6 +567,37 @@ describe("ClineAgentChatPanel", () => {
 		expect(container.textContent).not.toContain("Queued · the agent reads this");
 	});
 
+	it("renders fenced code in a user message with syntax highlighting", async () => {
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("idle")}
+					onLoadMessages={async () => [
+						{
+							id: "user-1",
+							role: "user",
+							content: "this fails\n```ts\nconst value = 42;\n```\ntry again",
+							createdAt: 1,
+						},
+					]}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		// The prompt a user sends is persisted as a user message, so its code blocks
+		// must be formatted like the assistant's, not dumped as literal backticks.
+		const codeBlock = container.querySelector("pre.kb-markdown-code");
+		expect(codeBlock).toBeInstanceOf(HTMLPreElement);
+		expect(codeBlock?.textContent).toContain("const value = 42;");
+		expect(codeBlock?.textContent).not.toContain("```");
+		expect(codeBlock?.querySelector(".token.keyword")?.textContent).toBe("const");
+		expect(container.textContent).toContain("this fails");
+		expect(container.textContent).toContain("try again");
+	});
+
 	it("renders newly streamed messages as they arrive", async () => {
 		const initialMessages: ClineChatMessage[] = [
 			{

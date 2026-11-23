@@ -88,7 +88,10 @@ const markdownComponents: Components = {
 		<h3 className={cn("mt-2 text-sm font-semibold text-text-primary", className)} {...props} />
 	),
 	p: ({ className, ...props }) => (
-		<p className={cn("leading-snug whitespace-pre-wrap text-sm text-text-primary", className)} {...props} />
+		<p
+			className={cn("leading-snug whitespace-pre-wrap wrap-break-word text-sm text-text-primary", className)}
+			{...props}
+		/>
 	),
 	ul: ({ className, ...props }) => (
 		<ul className={cn("list-disc pl-5 leading-snug text-sm text-text-primary", className)} {...props} />
@@ -97,14 +100,17 @@ const markdownComponents: Components = {
 		<ol className={cn("list-decimal pl-5 leading-snug text-sm text-text-primary", className)} {...props} />
 	),
 	li: ({ className, ...props }) => (
-		<li className={cn("leading-snug text-sm text-text-primary", className)} {...props} />
+		<li className={cn("leading-snug wrap-break-word text-sm text-text-primary", className)} {...props} />
 	),
 	a: ({ className, ...props }) => (
 		<a className={cn("text-accent-2 underline", className)} target="_blank" rel="noreferrer" {...props} />
 	),
 	blockquote: ({ className, ...props }) => (
 		<blockquote
-			className={cn("border-l-2 border-border-bright pl-3 text-sm leading-snug text-text-secondary", className)}
+			className={cn(
+				"border-l-2 border-border-bright pl-3 text-sm leading-snug wrap-break-word text-text-secondary",
+				className,
+			)}
 			{...props}
 		/>
 	),

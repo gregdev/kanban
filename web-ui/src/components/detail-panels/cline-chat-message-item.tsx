@@ -210,8 +210,8 @@ export const ClineChatMessageItem = React.memo(function ClineChatMessageItem({
 					<div className="mb-1 text-xs text-text-tertiary">Not sent · stopped before the agent read this</div>
 				) : null}
 				{hasText ? (
-					<div className={cn("whitespace-pre-wrap wrap-break-word", isCanceled && "line-through decoration-1")}>
-						{message.content}
+					<div className={cn("min-w-0", isCanceled && "line-through decoration-1")}>
+						<ClineMarkdownContent content={message.content} />
 					</div>
 				) : null}
 				{hasImages ? (
