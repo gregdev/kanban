@@ -335,7 +335,8 @@ export function useTerminalPanels({
 	);
 
 	const handleToggleDetailTerminal = useCallback(() => {
-		if (!selectedCard) {
+		// Done tasks have no worktree, so a shell terminal cannot be started for them.
+		if (!selectedCard || selectedCard.column.id === "trash") {
 			return;
 		}
 		const targetTaskId = getDetailTerminalTaskId(selectedCard.card.id);
@@ -364,7 +365,7 @@ export function useTerminalPanels({
 	]);
 
 	useEffect(() => {
-		if (!isDetailTerminalOpen || !selectedCard) {
+		if (!isDetailTerminalOpen || !selectedCard || selectedCard.column.id === "trash") {
 			detailTerminalSelectionKeyRef.current = null;
 			return;
 		}
@@ -374,7 +375,13 @@ export function useTerminalPanels({
 		}
 		detailTerminalSelectionKeyRef.current = selectionKey;
 		void startDetailTerminalForCard(selectedCard.card);
-	}, [isDetailTerminalOpen, selectedCard?.card.baseRef, selectedCard?.card.id, startDetailTerminalForCard]);
+	}, [
+		isDetailTerminalOpen,
+		selectedCard?.card.baseRef,
+		selectedCard?.card.id,
+		selectedCard?.column.id,
+		startDetailTerminalForCard,
+	]);
 
 	useEffect(() => {
 		if (!isHomeTerminalOpen) {
@@ -414,7 +421,8 @@ export function useTerminalPanels({
 			let hadExistingOpenTerminal = false;
 			let shouldWaitForConnection = false;
 			let waitForTerminalConnectionReady: (() => Promise<void>) | null = null;
-			const activeSelection = selectedCard;
+			// Done tasks have no worktree, so shortcuts fall back to the home terminal.
+			const activeSelection = selectedCard && selectedCard.column.id !== "trash" ? selectedCard : null;
 			if (activeSelection) {
 				targetTaskId = getDetailTerminalTaskId(activeSelection.card.id);
 				const selectionKey = `${activeSelection.card.id}:${activeSelection.card.baseRef}`;

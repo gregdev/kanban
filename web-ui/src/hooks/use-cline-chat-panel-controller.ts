@@ -30,6 +30,7 @@ interface UseClineChatPanelControllerInput {
 	onCancelAutomaticAction?: () => void;
 	cancelAutomaticActionLabel?: string | null;
 	showMoveToTrash?: boolean;
+	readOnly?: boolean;
 }
 
 interface UseClineChatPanelControllerResult {
@@ -66,6 +67,7 @@ export function useClineChatPanelController({
 	onCancelAutomaticAction,
 	cancelAutomaticActionLabel,
 	showMoveToTrash = false,
+	readOnly = false,
 }: UseClineChatPanelControllerInput): UseClineChatPanelControllerResult {
 	const draftScopeKey = createTextDraftKey({ kind: "agent-chat", workspaceId, taskId });
 	const [draft, setDraft] = usePersistedTextDraft(draftScopeKey);
@@ -78,8 +80,8 @@ export function useClineChatPanelController({
 		incomingMessages,
 		incomingMessage,
 	});
-	const canSend = Boolean(onSendMessage) && !isSending && !isCanceling;
-	const canCancel = Boolean(onCancelTurn) && summary?.state === "running" && !isCanceling;
+	const canSend = Boolean(onSendMessage) && !isSending && !isCanceling && !readOnly;
+	const canCancel = Boolean(onCancelTurn) && summary?.state === "running" && !isCanceling && !readOnly;
 	const showReviewActions =
 		taskColumnId === "review" &&
 		(reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0 &&

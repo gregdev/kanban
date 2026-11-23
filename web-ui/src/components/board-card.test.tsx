@@ -657,6 +657,30 @@ describe("BoardCard", () => {
 		expect(container.textContent).toContain(preview);
 	});
 
+	it("opens the completed task transcript when a Done card is clicked", async () => {
+		const onClick = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<TooltipProvider>
+					<BoardCard card={createCard()} index={0} columnId="trash" onClick={onClick} />
+				</TooltipProvider>,
+			);
+		});
+
+		const cardShell = container.querySelector('[data-task-id="task-1"]');
+		expect(cardShell).toBeInstanceOf(HTMLElement);
+		if (!(cardShell instanceof HTMLElement)) {
+			throw new Error("Expected a card shell.");
+		}
+
+		await act(async () => {
+			cardShell.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		expect(onClick).toHaveBeenCalledTimes(1);
+	});
+
 	it("renders session activity as single-line truncated text for running tasks", async () => {
 		const preview =
 			"Reviewing the archived implementation details and collecting the final notes for the handoff before cleanup hidden tail";

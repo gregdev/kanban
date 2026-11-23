@@ -630,7 +630,7 @@ describe("useBoardInteractions", () => {
 		expect(restoredTask?.agentId).toBe("codex");
 	});
 
-	it("ignores card selection requests for trashed tasks", async () => {
+	it("allows opening a completed task from the Done column", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		useProgrammaticCardMovesMock.mockReturnValue({
@@ -687,7 +687,7 @@ describe("useBoardInteractions", () => {
 			latestSnapshot!.handleCardSelect("task-trash");
 		});
 
-		expect(setSelectedTaskId).not.toHaveBeenCalled();
+		expect(setSelectedTaskId).toHaveBeenCalledWith("task-trash");
 	});
 
 	it("bounds clear-trash cleanup concurrency while still cleaning up every task", async () => {

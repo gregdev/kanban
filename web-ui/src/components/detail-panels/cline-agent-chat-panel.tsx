@@ -96,6 +96,8 @@ export interface ClineAgentChatPanelProps {
 	onCancelAutomaticAction?: () => void;
 	cancelAutomaticActionLabel?: string | null;
 	showMoveToTrash?: boolean;
+	/** Renders a read-only transcript with no composer or turn controls. */
+	readOnly?: boolean;
 }
 
 export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, ClineAgentChatPanelProps>(
@@ -127,6 +129,7 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			onCancelAutomaticAction,
 			cancelAutomaticActionLabel,
 			showMoveToTrash = false,
+			readOnly = false,
 		},
 		ref,
 	): ReactElement {
@@ -161,6 +164,7 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 			onCancelAutomaticAction,
 			cancelAutomaticActionLabel,
 			showMoveToTrash,
+			readOnly,
 		});
 		const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 		// TODO: Persist per-task mode immediately when toggled so page refresh restores unsent mode changes.
@@ -421,6 +425,11 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 					{messages.map((message) => (
 						<ClineChatMessageItem key={message.id} message={message} />
 					))}
+					{readOnly && messages.length === 0 && !isSending ? (
+						<p className="m-0 px-1 py-6 text-center text-xs text-text-tertiary">
+							No session transcript was recorded for this task.
+						</p>
+					) : null}
 					{showAgentProgressIndicator ? <ClineThinkingIndicator /> : null}
 					{isCreditLimitNoticeVisible ? <ClineCreditLimitNotice /> : null}
 				</div>
@@ -429,39 +438,45 @@ export const ClineAgentChatPanel = React.forwardRef<ClineAgentChatPanelHandle, C
 						{panelError}
 					</div>
 				) : null}
-				<div className="px-2 py-3">
-					<ClineChatComposer
-						taskId={taskId}
-						draft={draft}
-						onDraftChange={setDraft}
-						images={draftImages}
-						onImagesChange={setDraftImages}
-						placeholder={composerPlaceholder}
-						mode={mode}
-						onModeChange={handleModeChange}
-						showModeToggle={showComposerModeToggle}
-						canSend={canSend}
-						canCancel={canCancel}
-						onSend={handleComposerSend}
-						onCancel={handleCancelTurn}
-						modelOptions={modelOptions}
-						recommendedModelIds={modelPickerOptions.recommendedModelIds}
-						pinSelectedModelToTop={modelPickerOptions.shouldPinSelectedModelToTop}
-						selectedModelId={clineSettings.modelId}
-						selectedModelButtonText={selectedModelButtonText}
-						onSelectModel={handleSelectModel}
-						reasoningEnabledModelIds={reasoningEnabledModelIds}
-						selectedReasoningEffort={clineSettings.reasoningEffort}
-						onSelectReasoningEffort={handleSelectReasoningEffort}
-						isModelLoading={clineSettings.isLoadingProviderModels}
-						isModelSaving={isSavingModel}
-						modelPickerDisabled={isSavingModel || clineSettings.providerId.trim().length === 0}
-						isSending={isSavingModel || isSending}
-						warningMessage={summary?.warningMessage ?? null}
-						attachmentWarningMessage={attachmentWarningMessage}
-						workspaceId={workspaceId}
-					/>
-				</div>
+				{readOnly ? (
+					<div className="border-t border-border bg-surface-1 px-3 py-2 text-xs text-text-secondary">
+						This task is done, so this transcript is read-only. Restore the task to continue the session.
+					</div>
+				) : (
+					<div className="px-2 py-3">
+						<ClineChatComposer
+							taskId={taskId}
+							draft={draft}
+							onDraftChange={setDraft}
+							images={draftImages}
+							onImagesChange={setDraftImages}
+							placeholder={composerPlaceholder}
+							mode={mode}
+							onModeChange={handleModeChange}
+							showModeToggle={showComposerModeToggle}
+							canSend={canSend}
+							canCancel={canCancel}
+							onSend={handleComposerSend}
+							onCancel={handleCancelTurn}
+							modelOptions={modelOptions}
+							recommendedModelIds={modelPickerOptions.recommendedModelIds}
+							pinSelectedModelToTop={modelPickerOptions.shouldPinSelectedModelToTop}
+							selectedModelId={clineSettings.modelId}
+							selectedModelButtonText={selectedModelButtonText}
+							onSelectModel={handleSelectModel}
+							reasoningEnabledModelIds={reasoningEnabledModelIds}
+							selectedReasoningEffort={clineSettings.reasoningEffort}
+							onSelectReasoningEffort={handleSelectReasoningEffort}
+							isModelLoading={clineSettings.isLoadingProviderModels}
+							isModelSaving={isSavingModel}
+							modelPickerDisabled={isSavingModel || clineSettings.providerId.trim().length === 0}
+							isSending={isSavingModel || isSending}
+							warningMessage={summary?.warningMessage ?? null}
+							attachmentWarningMessage={attachmentWarningMessage}
+							workspaceId={workspaceId}
+						/>
+					</div>
+				)}
 				{showActionFooter ? (
 					<div className="flex flex-col gap-2 px-3 pb-3">
 						{showReviewActions ? (

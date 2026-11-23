@@ -90,6 +90,21 @@ function createCard(id: string): BoardCard {
 	};
 }
 
+function createCompletedSelection(): CardSelection {
+	const card = { ...createCard("done-task-1"), agentId: "cline" as const };
+	const columns: BoardColumn[] = [
+		{ id: "backlog", title: "Backlog", cards: [] },
+		{ id: "in_progress", title: "In Progress", cards: [] },
+		{ id: "review", title: "Review", cards: [] },
+		{ id: "trash", title: "Done", cards: [card] },
+	];
+	return {
+		card,
+		column: columns[3]!,
+		allColumns: columns,
+	};
+}
+
 function createSelection(): CardSelection {
 	const card = createCard("task-1");
 	const columns: BoardColumn[] = [
@@ -775,5 +790,35 @@ describe("CardDetailView", () => {
 		});
 
 		expect(requireDetailDiffFileTreePanel(container).style.flex).toBe("0 0 18%");
+	});
+
+	it("renders completed tasks as a read-only transcript with no diff toolbar", async () => {
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={createCompletedSelection()}
+					currentProjectId="workspace-1"
+					sessionSummary={null}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					onRestoreTaskFromTrash={() => {}}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+
+		const chatPanelProps = getLastMockFirstArg<{ readOnly?: boolean }>(mockClineAgentChatPanel);
+		expect(chatPanelProps.readOnly).toBe(true);
+		expect(container.textContent).toContain("Task completed");
+		const diffToolbarButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.trim() === "All Changes",
+		);
+		expect(diffToolbarButton).toBeUndefined();
 	});
 });
