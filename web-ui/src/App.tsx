@@ -665,11 +665,15 @@ export default function App(): ReactElement {
 		});
 	}, [runtimeProjectConfig, shouldUseNavigationPath]);
 
+	// Done tasks no longer have a worktree, so their detail view should open the
+	// project root instead of a path that no longer exists.
 	const activeWorkspacePath = selectedCard
-		? (getTaskWorkspaceInfo(selectedCard.card.id, selectedCard.card.baseRef)?.path ??
-			getTaskWorkspaceSnapshot(selectedCard.card.id)?.path ??
-			workspacePath ??
-			undefined)
+		? selectedCard.column.id === "trash"
+			? (workspacePath ?? navigationProjectPath ?? undefined)
+			: (getTaskWorkspaceInfo(selectedCard.card.id, selectedCard.card.baseRef)?.path ??
+				getTaskWorkspaceSnapshot(selectedCard.card.id)?.path ??
+				workspacePath ??
+				undefined)
 		: shouldUseNavigationPath
 			? (navigationProjectPath ?? undefined)
 			: (workspacePath ?? undefined);
@@ -882,7 +886,13 @@ export default function App(): ReactElement {
 									}
 						}
 						onToggleTerminal={
-							hasNoProjects ? undefined : selectedCard ? handleToggleDetailTerminal : handleToggleHomeTerminal
+							hasNoProjects
+								? undefined
+								: selectedCard
+									? selectedCard.column.id === "trash"
+										? undefined
+										: handleToggleDetailTerminal
+									: handleToggleHomeTerminal
 						}
 						isTerminalOpen={selectedCard ? isDetailTerminalOpen : showHomeBottomTerminal}
 						isTerminalLoading={selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting}

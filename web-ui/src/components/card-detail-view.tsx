@@ -1,11 +1,12 @@
 import type { DropResult } from "@hello-pangea/dnd";
-import { Files, GitCompareArrows, Maximize2, MessageSquare, Minimize2, X } from "lucide-react";
+import { CircleCheck, Files, GitCompareArrows, Maximize2, MessageSquare, Minimize2, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
 import { ClineAgentChatPanel, type ClineAgentChatPanelHandle } from "@/components/detail-panels/cline-agent-chat-panel";
 import { ColumnContextPanel } from "@/components/detail-panels/column-context-panel";
+import { CompletedTaskSessionPanel } from "@/components/detail-panels/completed-task-session-panel";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
 import { FileTreePanel } from "@/components/detail-panels/file-tree-panel";
 import { Button } from "@/components/ui/button";
@@ -181,13 +182,26 @@ function BottomTerminalSection({
 	);
 }
 
-function WorkspaceChangesEmptyPanel({ title }: { title: string }): React.ReactElement {
+function WorkspaceChangesEmptyPanel({
+	title,
+	description,
+	icon = <GitCompareArrows size={40} />,
+}: {
+	title: string;
+	description?: string | null;
+	icon?: ReactNode;
+}): React.ReactElement {
 	return (
 		<div className="flex min-h-0 min-w-0 bg-surface-0" style={{ flex: "1.6 1 0" }}>
 			<div className="kb-empty-state-center flex-1">
-				<div className="flex flex-col items-center justify-center gap-3 py-12 text-text-tertiary">
-					<GitCompareArrows size={40} />
+				<div className="flex flex-col items-center justify-center gap-3 px-8 py-12 text-text-tertiary">
+					{icon}
 					<h3 className="font-semibold text-text-secondary">{title}</h3>
+					{description ? (
+						<p className="m-0 max-w-[420px] text-center text-xs leading-[1.5] text-text-tertiary">
+							{description}
+						</p>
+					) : null}
 				</div>
 			</div>
 		</div>
@@ -513,6 +527,7 @@ export function CardDetailView({
 	const detailDiffContentPanelPercent = `${((1 - detailDiffFileTreeRatio) * 100).toFixed(1)}%`;
 	const detailDiffFileTreePanelFlex = `0 0 ${detailDiffFileTreePanelPercent}`;
 	const showMoveToTrashActions = selection.column.id === "review" || selection.column.id === "in_progress";
+	const isCompletedTask = selection.column.id === "trash";
 	const isTaskTerminalEnabled = selection.column.id === "in_progress" || selection.column.id === "review";
 	const effectiveTaskAgentId = sessionSummary?.agentId ?? selection.card.agentId ?? selectedAgentId;
 	const showClineAgentChatPanel = isNativeClineAgentSelected(effectiveTaskAgentId);
@@ -670,6 +685,12 @@ export function CardDetailView({
 					? getTaskAutoReviewCancelButtonLabel(selection.card.autoReviewMode)
 					: null
 			}
+			readOnly={isCompletedTask}
+		/>
+	) : isCompletedTask ? (
+		<CompletedTaskSessionPanel
+			summary={sessionSummary}
+			onRestore={onRestoreTaskFromTrash ? () => onRestoreTaskFromTrash(selection.card.id) : undefined}
 		/>
 	) : (
 		<AgentTerminalPanel
@@ -722,7 +743,7 @@ export function CardDetailView({
 							className="min-h-0 min-w-0 flex-1 flex-col"
 							style={{ display: mobileTab === "diff" ? "flex" : "none" }}
 						>
-							{isRuntimeAvailable ? (
+							{!isCompletedTask && isRuntimeAvailable ? (
 								<DiffToolbar
 									mode={diffMode}
 									onModeChange={setDiffMode}
@@ -732,7 +753,13 @@ export function CardDetailView({
 								/>
 							) : null}
 							<div className="flex min-h-0 flex-1">
-								{isWorkspaceChangesPending ? (
+								{isCompletedTask ? (
+									<WorkspaceChangesEmptyPanel
+										title="Task completed"
+										description="The task worktree was removed when this card moved to Done. Committed changes stay in git, and uncommitted changes captured at completion are kept as a restore patch."
+										icon={<CircleCheck size={40} className="text-status-green" />}
+									/>
+								) : isWorkspaceChangesPending ? (
 									<WorkspaceChangesLoadingPanel panelFlex="1 1 0" />
 								) : hasNoWorkspaceFileChanges ? (
 									<WorkspaceChangesEmptyPanel title={emptyDiffTitle} />
@@ -862,7 +889,7 @@ export function CardDetailView({
 								className="flex min-h-0 min-w-0 flex-col"
 								style={{ width: isDiffExpanded ? "100%" : diffPanelPercent }}
 							>
-								{isRuntimeAvailable ? (
+								{!isCompletedTask && isRuntimeAvailable ? (
 									<DiffToolbar
 										mode={diffMode}
 										onModeChange={setDiffMode}
@@ -871,7 +898,13 @@ export function CardDetailView({
 									/>
 								) : null}
 								<div className="flex min-h-0 flex-1">
-									{isWorkspaceChangesPending ? (
+									{isCompletedTask ? (
+										<WorkspaceChangesEmptyPanel
+											title="Task completed"
+											description="The task worktree was removed when this card moved to Done. Committed changes stay in git, and uncommitted changes captured at completion are kept as a restore patch."
+											icon={<CircleCheck size={40} className="text-status-green" />}
+										/>
+									) : isWorkspaceChangesPending ? (
 										<WorkspaceChangesLoadingPanel panelFlex={detailDiffFileTreePanelFlex} />
 									) : hasNoWorkspaceFileChanges ? (
 										<WorkspaceChangesEmptyPanel title={emptyDiffTitle} />
