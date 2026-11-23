@@ -901,6 +901,75 @@ describe("InMemoryClineSessionRuntime", () => {
 		expect(fakeHost.readMessages).toHaveBeenCalledWith("task-1-newer");
 	});
 
+	it("caches the persisted session record so repeat reads skip the list() scan", async () => {
+		const persistedRecord = createPersistedRecord({
+			sessionId: "task-1-newer",
+			status: "completed",
+			startedAt: "2026-03-17T10:10:00.000Z",
+			updatedAt: "2026-03-17T10:15:00.000Z",
+		});
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => persistedRecord),
+			list: vi.fn(async () => [persistedRecord]),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		const firstSnapshot = await runtime.readPersistedTaskSession("task-1");
+		const secondSnapshot = await runtime.readPersistedTaskSession("task-1");
+
+		expect(firstSnapshot?.record.sessionId).toBe("task-1-newer");
+		expect(secondSnapshot?.record.sessionId).toBe("task-1-newer");
+		expect(fakeHost.list).toHaveBeenCalledTimes(1);
+		expect(fakeHost.get).toHaveBeenCalledTimes(1);
+		expect(fakeHost.get).toHaveBeenCalledWith("task-1-newer");
+	});
+
+	it("unsubscribes from the SDK event stream when disposed", async () => {
+		const unsubscribe = vi.fn();
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => unsubscribe),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		// Forces ensureSessionHost so the runtime actually subscribes.
+		await runtime.readPersistedTaskSession("task-1");
+		await runtime.dispose();
+
+		expect(fakeHost.subscribe).toHaveBeenCalledTimes(1);
+		expect(unsubscribe).toHaveBeenCalledTimes(1);
+	});
+
 	it("rebinds a task id to the latest persisted SDK session before resuming sends", async () => {
 		const fakeHost = {
 			start: vi.fn(async (input: { config?: { sessionId?: string } }) => ({

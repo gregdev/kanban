@@ -38,6 +38,10 @@ import {
 export { CLINE_MODEL_CATALOG_DEFAULTS } from "./sdk-provider-boundary";
 
 const DEFAULT_CLINE_MAX_CONSECUTIVE_MISTAKES = 6;
+// Upper bound for the persisted-record cache. A runtime only opens a handful of
+// tasks in practice, but the map is long-lived, so cap it instead of growing
+// without limit across a long-running session.
+const MAX_CACHED_PERSISTED_SESSION_RECORDS = 256;
 
 interface ClineSessionHostBoundary {
 	start(input: ClineSdkStartSessionInput): Promise<{ sessionId: string; result?: unknown }>;
@@ -218,6 +222,13 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 	private readonly mcpToolBundleByTaskId = new Map<string, ClineMcpToolBundle>();
 	private readonly resolveRestartLaunchConfig: ClineRestartLaunchContextResolver | null;
 	private sessionHostPromise: Promise<ClineSessionHostBoundary> | null = null;
+	private sessionHostUnsubscribe: (() => void) | null = null;
+	// Caches the persisted SDK session record per task id so repeat card opens do
+	// not re-run sessionHost.list(). One list() call does dead-session
+	// reconciliation plus a wide history query and per-session manifest reads,
+	// while a cache hit only costs a single get(). Invalidated whenever the task's
+	// session binding changes or its sessions are cleared.
+	private readonly persistedRecordByTaskId = new Map<string, ClineSdkSessionRecord>();
 
 	constructor(options: CreateInMemoryClineSessionRuntimeOptions = {}) {
 		this.onTaskEvent = options.onTaskEvent ?? null;
@@ -566,6 +577,7 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 			this.taskIdBySessionId.delete(sessionId);
 		}
 		this.clearTaskSessionBinding(taskId);
+		this.persistedRecordByTaskId.delete(taskId);
 		await this.releaseTaskMcpToolBundle(taskId);
 	}
 
@@ -606,7 +618,12 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		this.sessionHostPromise = null;
 		if (hostPromise) {
 			try {
+				// Await the host before unsubscribing. ensureSessionHost only records the
+				// unsubscribe once the host promise resolves, so tearing down while the
+				// host is still starting would otherwise leave the listener attached to
+				// a runtime that is going away.
 				const host = await hostPromise;
+				this.unsubscribeFromSessionHost();
 				await host.dispose("kanban-runtime-dispose");
 			} catch {
 				// Ignore host disposal errors.
@@ -615,6 +632,7 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		this.sessionIdByTaskId.clear();
 		this.taskIdBySessionId.clear();
 		this.lastStartRequestByTaskId.clear();
+		this.persistedRecordByTaskId.clear();
 
 		const mcpBundles = [...this.mcpToolBundleByTaskId.values()];
 		this.mcpToolBundleByTaskId.clear();
@@ -652,6 +670,11 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		}
 		this.sessionIdByTaskId.set(taskId, sessionId);
 		this.taskIdBySessionId.set(sessionId, taskId);
+		// Drop a cached record only when it points at a different session. Binding
+		// the record we just resolved keeps the cache warm for the next read.
+		if (this.persistedRecordByTaskId.get(taskId)?.sessionId !== sessionId) {
+			this.persistedRecordByTaskId.delete(taskId);
+		}
 	}
 
 	private clearTaskSessionBinding(taskId: string, sessionId?: string): void {
@@ -666,6 +689,18 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 		this.taskIdBySessionId.delete(activeSessionId);
 	}
 
+	private rememberPersistedRecord(taskId: string, record: ClineSdkSessionRecord): void {
+		const atCapacity = this.persistedRecordByTaskId.size >= MAX_CACHED_PERSISTED_SESSION_RECORDS;
+		if (atCapacity && !this.persistedRecordByTaskId.has(taskId)) {
+			// Map iteration is insertion-ordered, so the first key is the coldest entry.
+			const oldestTaskId = this.persistedRecordByTaskId.keys().next().value;
+			if (oldestTaskId !== undefined) {
+				this.persistedRecordByTaskId.delete(oldestTaskId);
+			}
+		}
+		this.persistedRecordByTaskId.set(taskId, record);
+	}
+
 	private async findPersistedTaskSessionRecord(
 		taskId: string,
 		sessionHost: ClineSessionHostBoundary,
@@ -678,6 +713,18 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 			}
 		}
 
+		// Reuse the record resolved by an earlier list() scan, refreshing it with a
+		// single get() so a record deleted behind our back falls back to a rescan.
+		const cachedRecord = this.persistedRecordByTaskId.get(taskId);
+		if (cachedRecord) {
+			const refreshedRecord = (await sessionHost.get(cachedRecord.sessionId)) ?? null;
+			if (refreshedRecord) {
+				this.rememberPersistedRecord(taskId, refreshedRecord);
+				return refreshedRecord;
+			}
+			this.persistedRecordByTaskId.delete(taskId);
+		}
+
 		const sessionIdPrefix = buildSessionIdPrefix(taskId);
 		const records: ClineSdkSessionRecord[] = await sessionHost.list();
 		const matchingRecord = records
@@ -687,19 +734,37 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 				const rightTimestamp = Date.parse(right.updatedAt || right.startedAt);
 				return rightTimestamp - leftTimestamp;
 			})[0];
+		if (matchingRecord) {
+			this.rememberPersistedRecord(taskId, matchingRecord);
+		}
 		return matchingRecord ?? null;
 	}
 
 	private async ensureSessionHost(): Promise<ClineSessionHostBoundary> {
 		if (!this.sessionHostPromise) {
 			this.sessionHostPromise = this.createSessionHost().then((sessionHost: ClineSessionHostBoundary) => {
-				sessionHost.subscribe((event: unknown) => {
+				// Keep the unsubscribe: an un-unsubscribed listener keeps this runtime
+				// reachable after dispose.
+				this.sessionHostUnsubscribe = sessionHost.subscribe((event: unknown) => {
 					this.handleSessionEvent(event);
 				});
 				return sessionHost;
 			});
 		}
 		return await this.sessionHostPromise;
+	}
+
+	private unsubscribeFromSessionHost(): void {
+		const unsubscribe = this.sessionHostUnsubscribe;
+		if (!unsubscribe) {
+			return;
+		}
+		this.sessionHostUnsubscribe = null;
+		try {
+			unsubscribe();
+		} catch {
+			// Ignore unsubscribe errors during shutdown.
+		}
 	}
 
 	private updateActiveSessionMode(
