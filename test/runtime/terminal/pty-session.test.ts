@@ -19,6 +19,7 @@ const originalComSpec = process.env.ComSpec;
 const originalCOMSPEC = process.env.COMSPEC;
 const originalPath = process.env.PATH;
 const originalPathExt = process.env.PATHEXT;
+const isWindows = process.platform === "win32";
 
 function setPlatform(value: NodeJS.Platform): void {
 	Object.defineProperty(process, "platform", {
@@ -127,7 +128,14 @@ describe("PtySession", () => {
 		expect(ptyMocks.spawn.mock.calls[0]?.[1]).toBe('/d /s /c "cline"');
 	});
 
-	it("launches bare executables directly on Windows when PATH resolves to .exe", () => {
+	// This one needs a real Windows host, unlike the other win32 cases above.
+	// shouldUseWindowsCmdLaunch resolves a bare binary by splitting PATH on ";"
+	// and then joining candidates with the host's path.join, so the resolution is
+	// only faithful where the filesystem and delimiter are genuinely Windows.
+	// On POSIX the simulation passes only by luck (and breaks outright once
+	// applyAgentRuntimeEnv rewrites PATH with the ":" delimiter), so a skip is
+	// more honest than an assertion that exercises a fiction.
+	it.skipIf(!isWindows)("launches bare executables directly on Windows when PATH resolves to .exe", () => {
 		setPlatform("win32");
 		process.env.ComSpec = "C:\\Windows\\System32\\cmd.exe";
 		process.env.PATHEXT = ".com;.exe;.bat;.cmd";
