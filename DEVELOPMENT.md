@@ -166,9 +166,11 @@ npm run unlink
 - `npm run web:build`: build web UI
 - `npm run typecheck`: typecheck runtime
 - `npm run web:typecheck`: typecheck web UI
-- `npm run test`: run runtime tests
+- `npm run test`: run runtime unit tests (fast; skips `test/integration`)
+- `npm run test:all`: run every root test, including integration tests
+- `npm run test:integration`: run only the integration tests (also run in CI)
 - `npm run web:test`: run web UI tests
-- `npm run check`: lint, typecheck, and test runtime package
+- `npm run check`: lint, typecheck, and the full root test suite
 
 ## Tests
 

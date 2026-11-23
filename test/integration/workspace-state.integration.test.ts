@@ -97,7 +97,7 @@ function initGitRepository(path: string): void {
 	}
 }
 
-describe.sequential("workspace-state integration", () => {
+describe("workspace-state integration", { concurrent: false }, () => {
 	it("persists revision numbers and rejects stale writes", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-");

@@ -6,7 +6,6 @@ import { resolve } from "node:path";
 import { Command, Option } from "commander";
 import ora, { type Ora } from "ora";
 import packageJson from "../package.json" with { type: "json" };
-import { disposeCliTelemetryService } from "./cline-sdk/cline-telemetry-service.js";
 import { registerHooksCommand } from "./commands/hooks";
 import { registerTaskCommand } from "./commands/task";
 import { loadGlobalRuntimeConfig, loadRuntimeConfig } from "./config/runtime-config";
@@ -33,7 +32,6 @@ import {
 import { disablePasscode, generateInternalToken, generatePasscode } from "./security/passcode-manager";
 import { terminateProcessForTimeout } from "./server/process-termination";
 import type { RuntimeStateHub } from "./server/runtime-state-hub";
-import { captureNodeException, flushNodeTelemetry } from "./telemetry/sentry-node.js";
 import type { TerminalSessionManager } from "./terminal/session-manager";
 import { runOnDemandUpdate } from "./update/update";
 
@@ -49,6 +47,75 @@ interface CliOptions {
 }
 
 const KANBAN_VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.1.0";
+
+/*
+	Telemetry dependencies are loaded lazily.
+
+	`@sentry/node` and `@clinebot/core` together add roughly a second of module
+	evaluation to every process that imports them. Command-style invocations
+	(`kanban task ...`, `kanban hooks ...`, `--help`, `--version`) never emit
+	telemetry on the happy path, yet they used to pay that cost on every spawn.
+	Because Kanban shells out to itself for each task command, that overhead was
+	the largest single contributor to CLI cold start (and to integration test
+	runtime). The server path still initializes Sentry up front so runtime errors
+	keep being reported.
+*/
+let nodeTelemetryModulePromise: Promise<typeof import("./telemetry/sentry-node.js")> | undefined;
+let cliTelemetryModulePromise: Promise<typeof import("./cline-sdk/cline-telemetry-service.js")> | undefined;
+
+function loadNodeTelemetry(): Promise<typeof import("./telemetry/sentry-node.js")> {
+	nodeTelemetryModulePromise ??= import("./telemetry/sentry-node.js");
+	return nodeTelemetryModulePromise;
+}
+
+function loadCliTelemetry(): Promise<typeof import("./cline-sdk/cline-telemetry-service.js")> {
+	cliTelemetryModulePromise ??= import("./cline-sdk/cline-telemetry-service.js");
+	return cliTelemetryModulePromise;
+}
+
+// Initialize long-running server telemetry without blocking startup. The Cline
+// telemetry module is loaded here as well as by the SDK runtime, so that
+// shutdown can dispose the singleton without command-style invocations ever
+// importing it.
+function initializeServerTelemetry(): void {
+	void loadNodeTelemetry().catch(() => {});
+	void loadCliTelemetry().catch(() => {});
+}
+
+async function captureNodeExceptionLazily(error: unknown, options?: { area?: string }): Promise<void> {
+	try {
+		const { captureNodeException } = await loadNodeTelemetry();
+		captureNodeException(error, options);
+	} catch {
+		// Telemetry must never mask the original failure.
+	}
+}
+
+// Only dispose/flush modules that were actually loaded, so that command-style
+// invocations do not pay to import them just to tear them down.
+async function disposeCliTelemetryIfLoaded(): Promise<void> {
+	if (!cliTelemetryModulePromise) {
+		return;
+	}
+	try {
+		const { disposeCliTelemetryService } = await cliTelemetryModulePromise;
+		await disposeCliTelemetryService();
+	} catch {
+		// Telemetry teardown is best-effort.
+	}
+}
+
+async function flushNodeTelemetryIfLoaded(): Promise<void> {
+	if (!nodeTelemetryModulePromise) {
+		return;
+	}
+	try {
+		const { flushNodeTelemetry } = await nodeTelemetryModulePromise;
+		await flushNodeTelemetry();
+	} catch {
+		// Telemetry flush is best-effort.
+	}
+}
 
 function parseCliPortValue(rawValue: string): { mode: "fixed"; value: number } | { mode: "auto" } {
 	const normalized = rawValue.trim().toLowerCase();
@@ -538,6 +605,7 @@ async function startServerWithAutoPortRetry(options: CliOptions): Promise<Awaite
 }
 
 async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolean): Promise<void> {
+	initializeServerTelemetry();
 	if (options.host) {
 		setKanbanRuntimeHost(options.host);
 		console.log(`Binding to host ${options.host}.`);
@@ -619,7 +687,7 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 		await runtime.shutdown({
 			skipSessionCleanup: options.skipShutdownCleanup,
 		});
-		await disposeCliTelemetryService().catch(() => {});
+		await disposeCliTelemetryIfLoaded();
 	};
 
 	installGracefulShutdownHandlers({
@@ -643,7 +711,7 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 		},
 		onShutdownError: (error) => {
 			shutdownIndicator.stop("failed");
-			captureNodeException(error, { area: "shutdown" });
+			void captureNodeExceptionLazily(error, { area: "shutdown" });
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Shutdown failed: ${message}`);
 		},
@@ -741,14 +809,19 @@ async function run(): Promise<void> {
 	const program = createProgram(argv);
 	await program.parseAsync(argv, { from: "user" });
 	if (!shouldAutoOpenBrowserTabForInvocation(argv)) {
-		await Promise.allSettled([disposeCliTelemetryService(), flushNodeTelemetry()]);
+		await Promise.allSettled([disposeCliTelemetryIfLoaded(), flushNodeTelemetryIfLoaded()]);
 		process.exit(process.exitCode ?? 0);
 	}
 }
 
 void run().catch(async (error) => {
-	captureNodeException(error, { area: "startup" });
-	await Promise.allSettled([disposeCliTelemetryService(), flushNodeTelemetry()]);
+	await Promise.allSettled([
+		captureNodeExceptionLazily(error, { area: "startup" }),
+		(async () => {
+			await disposeCliTelemetryIfLoaded();
+			await flushNodeTelemetryIfLoaded();
+		})(),
+	]);
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(`Failed to start Kanban: ${message}`);
 	process.exit(1);

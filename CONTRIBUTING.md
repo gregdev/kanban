@@ -67,7 +67,8 @@ PRs without a corresponding issue may be closed.
    - No inline or dynamic imports. Use standard top-level imports.
    - Write production-quality code, not prototypes.
 
-3. Add tests for your changes. Run `npm run test` to verify everything passes.
+3. Add tests for your changes. Run `npm run test:all` to verify everything (including the
+   slower integration suite) passes; `npm run test` runs only the fast unit tests.
 
 4. Use [conventional commit](https://www.conventionalcommits.org/) format for commit messages (e.g., `fix(terminal):`, `feat(agents):`, `test:`). Reference the issue number with `fixes #123` or `closes #123` when applicable.
 

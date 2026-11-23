@@ -100,7 +100,7 @@ function getCommandArgs(args: readonly string[], options?: ExecFileOptions): { c
 	throw new Error(`Unexpected git args: ${args.join(" ")}`);
 }
 
-describe.sequential("task-worktree serialization", () => {
+describe("task-worktree serialization", { concurrent: false }, () => {
 	beforeEach(() => {
 		childProcessMocks.execFile.mockReset();
 		childProcessMocks.execFilePromise.mockReset();

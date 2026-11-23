@@ -94,7 +94,7 @@ function createSession(taskId: string, state: "running" | "awaiting_review" | "i
 	};
 }
 
-describe.sequential("shutdown coordinator integration", () => {
+describe("shutdown coordinator integration", { concurrent: false }, () => {
 	it("moves all in-progress and review cards to trash for every indexed project on shutdown", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-shutdown-scope-");

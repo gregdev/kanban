@@ -65,7 +65,7 @@ function writeFakeCommand(binDir: string, command: string): void {
 	chmodSync(scriptPath, 0o755);
 }
 
-describe.sequential("runtime-config auto agent selection", () => {
+describe("runtime-config auto agent selection", { concurrent: false }, () => {
 	it("selects agents using the configured priority order", () => {
 		expect(pickBestInstalledAgentIdFromDetected(["codex", "opencode", "gemini"])).toBe("codex");
 		expect(pickBestInstalledAgentIdFromDetected(["opencode", "droid", "gemini"])).toBe("droid");
@@ -528,8 +528,11 @@ describe.sequential("runtime-config auto agent selection", () => {
 					30,
 				);
 				expect(
-					(await updateRuntimeConfig(tempProject, { agentCommandTimeoutSec: Number.MAX_SAFE_INTEGER }))
-						.agentCommandTimeoutSec,
+					(
+						await updateRuntimeConfig(tempProject, {
+							agentCommandTimeoutSec: Number.MAX_SAFE_INTEGER,
+						})
+					).agentCommandTimeoutSec,
 				).toBe(3600);
 			});
 		} finally {
@@ -556,7 +559,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 						agentEnv: {
 							PNPM_HOME: "~/.local/share/pnpm",
 							TOOL_HOME: "$HOME/tooling",
-							// biome-ignore lint/suspicious/noTemplateCurlyInString: config input, not a template
+							// oxlint-disable-next-line eslint/no-template-curly-in-string -- config input, not a template
 							BRACED_HOME: "${HOME}/braced",
 							NUMERIC_VALUE: 7,
 						},
@@ -604,7 +607,9 @@ describe.sequential("runtime-config auto agent selection", () => {
 			);
 
 			await withTemporaryEnv({ home: tempHome }, async () => {
-				const updated = await updateRuntimeConfig(tempProject, { agentAutonomousModeEnabled: false });
+				const updated = await updateRuntimeConfig(tempProject, {
+					agentAutonomousModeEnabled: false,
+				});
 				expect(updated.agentPathPrepend).toEqual([join(tempHome, "agent-bin")]);
 				expect(updated.agentEnv).toEqual({
 					AGENT_FLAG: "1",

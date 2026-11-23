@@ -59,7 +59,7 @@ async function withTemporaryHome<T>(run: () => Promise<T>): Promise<T> {
 	}
 }
 
-describe.sequential("task-worktree integration", () => {
+describe("task-worktree integration", { concurrent: false }, () => {
 	it("returns a friendly error when the repository has no initial commit", async () => {
 		await withTemporaryHome(async () => {
 			const { path: sandboxRoot, cleanup } = createTempDir("kanban-task-worktree-unborn-");

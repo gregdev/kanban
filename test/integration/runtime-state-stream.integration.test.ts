@@ -168,7 +168,11 @@ function resolveTsxLoaderImportSpecifier(): string {
 	return pathToFileURL(requireFromHere.resolve("tsx")).href;
 }
 
-async function waitForProcessStart(process: ChildProcess, timeoutMs = 10_000): Promise<{ runtimeUrl: string }> {
+// Booting the source CLI (tsx + full runtime graph) normally takes ~1-2s, but
+// when the whole unit suite is running in parallel the machine can be CPU
+// saturated. A tight timeout there produces false failures rather than real
+// bugs, so allow a generous budget before declaring startup broken.
+async function waitForProcessStart(process: ChildProcess, timeoutMs = 30_000): Promise<{ runtimeUrl: string }> {
 	return await new Promise((resolveStart, rejectStart) => {
 		if (!process.stdout || !process.stderr) {
 			rejectStart(new Error("Expected child process stdout/stderr pipes to be available."));
@@ -455,7 +459,7 @@ async function requestJson<T>(input: {
 	};
 }
 
-describe.sequential("runtime state stream integration", () => {
+describe("runtime state stream integration", { concurrent: false }, () => {
 	it("starts outside a git repository with no active workspace", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-no-git-");
 		const { path: nonGitPath, cleanup: cleanupNonGitPath } = createTempDir("kanban-no-git-");
@@ -497,7 +501,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupNonGitPath();
 			cleanupHome();
 		}
-	}, 30_000);
+	}, 60_000);
 
 	it("starts from the home directory with no active workspace", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-home-dir-launch-");
@@ -538,7 +542,7 @@ describe.sequential("runtime state stream integration", () => {
 			await server.stop();
 			cleanupHome();
 		}
-	}, 30_000);
+	}, 60_000);
 
 	it("launches outside git using the first indexed project", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-first-project-");
@@ -621,7 +625,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupRoot();
 			cleanupHome();
 		}
-	}, 45_000);
+	}, 90_000);
 
 	it("requires explicit confirmation before initializing git for a non-git added project", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-project-add-git-confirm-");
@@ -688,7 +692,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupRoot();
 			cleanupHome();
 		}
-	}, 45_000);
+	}, 60_000);
 
 	it("streams per-project snapshots and isolates workspace updates", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-stream-");
@@ -809,7 +813,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupRoot();
 			cleanupHome();
 		}
-	}, 30_000);
+	}, 60_000);
 
 	it("emits task_ready_for_review when hook review event is ingested", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-hook-stream-");
@@ -890,7 +894,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupProject();
 			cleanupHome();
 		}
-	}, 30_000);
+	}, 60_000);
 
 	it("streams centralized workspace metadata updates for task worktrees", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-metadata-stream-");
@@ -1014,7 +1018,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupProject();
 			cleanupHome();
 		}
-	}, 45_000);
+	}, 60_000);
 
 	it("preserves existing task worktree when base ref advances", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-preserve-worktree-");
@@ -1131,7 +1135,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupProject();
 			cleanupHome();
 		}
-	}, 45_000);
+	}, 90_000);
 
 	it("moves stale completed review cards to trash on shutdown", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-stale-exit-review-");
@@ -1250,7 +1254,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupProject();
 			cleanupHome();
 		}
-	}, 45_000);
+	}, 90_000);
 
 	it("skips stale session shutdown cleanup when --skip-shutdown-cleanup is enabled", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-skip-cleanup-flag-");
@@ -1372,7 +1376,7 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupProject();
 			cleanupHome();
 		}
-	}, 45_000);
+	}, 90_000);
 
 	it("falls back to remaining project when removing the active project", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-remove-");
@@ -1474,5 +1478,5 @@ describe.sequential("runtime state stream integration", () => {
 			cleanupRoot();
 			cleanupHome();
 		}
-	}, 30_000);
+	}, 60_000);
 });
