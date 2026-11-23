@@ -464,7 +464,7 @@ async function startServer(): Promise<{
 		{ createRuntimeStateHub },
 		{ resolveInteractiveShellCommand },
 		{ shutdownRuntimeServer },
-		{ loadWorkspaceStateById, mutateWorkspaceState },
+		{ loadWorkspaceBoardById, mutateWorkspaceState },
 		{ collectProjectWorktreeTaskIdsForRemoval, createWorkspaceRegistry },
 		{ clearPendingUpdateNotification, getPendingUpdateNotification },
 	] = await Promise.all([
@@ -583,13 +583,9 @@ async function startServer(): Promise<{
 	// already-running runtime never reach this point and must not reconcile.
 	autoReviewReconciler = createAutoReviewReconciler({
 		listWorkspaces: () => workspaceRegistry.listManagedWorkspaces(),
-		getWorkspaceState: async (workspaceId) => {
-			const state = await loadWorkspaceStateById(workspaceId);
-			if (!state) {
-				throw new Error(`Workspace ${workspaceId} is no longer registered.`);
-			}
-			return state;
-		},
+		// Board-only read: this runs every few seconds for every tracked workspace,
+		// and the full state reader resolves git metadata with synchronous probes.
+		getBoard: (workspaceId) => loadWorkspaceBoardById(workspaceId),
 		mutateWorkspaceState,
 		getPromptTemplates: async (workspaceId, workspacePath) => {
 			const config = await workspaceRegistry.loadScopedRuntimeConfig({ workspaceId, workspacePath });

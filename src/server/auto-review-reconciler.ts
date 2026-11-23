@@ -72,7 +72,14 @@ export type MutateWorkspaceState = <T>(
 
 export interface CreateAutoReviewReconcilerDependencies {
 	listWorkspaces: () => AutoReviewWorkspace[];
-	getWorkspaceState: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
+	/**
+	 * Reads one workspace's board. Deliberately narrower than the full workspace
+	 * state: this runs for every tracked workspace on every cycle, so it must not
+	 * shell out. The full state reader resolves git metadata with synchronous
+	 * `git` probes, which would block the runtime's event loop every few seconds
+	 * even for a workspace with no auto-review work to do.
+	 */
+	getBoard: (workspaceId: string) => Promise<RuntimeBoardData>;
 	mutateWorkspaceState: MutateWorkspaceState;
 	getPromptTemplates: (workspaceId: string, workspacePath: string) => Promise<TaskGitPromptTemplates | null>;
 	/** Workspace-level default agent; cards may override it via `agentId`. */
@@ -397,7 +404,7 @@ export function createAutoReviewReconciler(deps: CreateAutoReviewReconcilerDepen
 	const reconcileWorkspace = async (
 		workspace: AutoReviewWorkspace,
 		workspacePath: string,
-		state: RuntimeWorkspaceStateResponse,
+		board: RuntimeBoardData,
 		runtime: ReconcilerWorkspaceRuntime,
 	): Promise<void> => {
 		const timestamp = deps.now?.() ?? Date.now();
@@ -409,7 +416,7 @@ export function createAutoReviewReconciler(deps: CreateAutoReviewReconcilerDepen
 		// Housekeeping pass first: armed cards that left review (or lost the
 		// auto-review toggle) are disarmed. This needs no git work.
 		const candidates: RuntimeBoardCard[] = [];
-		for (const column of state.board.columns) {
+		for (const column of board.columns) {
 			for (const card of column.cards) {
 				const pendingGitAction = card.pendingGitAction ?? null;
 				if (column.id !== "review") {
@@ -572,19 +579,19 @@ export function createAutoReviewReconciler(deps: CreateAutoReviewReconcilerDepen
 			return;
 		}
 
-		let state: RuntimeWorkspaceStateResponse;
+		let board: RuntimeBoardData;
 		try {
-			state = await deps.getWorkspaceState(workspace.workspaceId, workspacePath);
+			board = await deps.getBoard(workspace.workspaceId);
 		} catch (error) {
-			deps.warn?.(`Auto-review could not read workspace state for ${workspace.workspaceId}: ${String(error)}`);
+			deps.warn?.(`Auto-review could not read the board for ${workspace.workspaceId}: ${String(error)}`);
 			return;
 		}
-		// The workspace may have been untracked while its state was being read.
+		// The workspace may have been untracked while its board was being read.
 		if (!workspaceRuntimes.has(workspaceId)) {
 			return;
 		}
 
-		await reconcileWorkspace(workspace, workspacePath, state, runtime);
+		await reconcileWorkspace(workspace, workspacePath, board, runtime);
 	};
 
 	const evaluateWorkspace = async (workspaceId: string): Promise<void> => {

@@ -179,6 +179,8 @@ function createHarness(options: HarnessOptions) {
 	const warn = vi.fn();
 	let staleSnapshot: RuntimeWorkspaceStateResponse | null = null;
 
+	const getBoard = vi.fn(async () => (staleSnapshot ?? (await store.getWorkspaceState())).board);
+
 	const dependencies: CreateAutoReviewReconcilerDependencies = {
 		listWorkspaces: () => [
 			{
@@ -187,7 +189,7 @@ function createHarness(options: HarnessOptions) {
 				terminalManager: terminal.manager,
 			},
 		],
-		getWorkspaceState: async () => staleSnapshot ?? (await store.getWorkspaceState()),
+		getBoard,
 		mutateWorkspaceState: store.mutateWorkspaceState,
 		getPromptTemplates: async () =>
 			options.promptTemplates ?? {
@@ -211,6 +213,7 @@ function createHarness(options: HarnessOptions) {
 		store,
 		terminal,
 		probeTaskWorkspace,
+		getBoard,
 		onBoardMutated,
 		warn,
 		setProbe(taskId: string, probe: AutoReviewTaskProbe) {
@@ -346,6 +349,10 @@ describe("auto-review reconciler", () => {
 		expect(harness.probeTaskWorkspace).not.toHaveBeenCalled();
 		expect(harness.terminal.writeInput).not.toHaveBeenCalled();
 		expect(harness.store.stored.revision).toBe(1);
+		// The cycle does read the board (that is how candidates are found), but it
+		// must not touch a richer state reader that resolves git metadata.
+		expect(harness.getBoard).toHaveBeenCalledTimes(1);
+		expect(harness.getBoard).toHaveBeenCalledWith("ws-1");
 	});
 
 	it("starts exactly one git action when two evaluations race", async () => {
