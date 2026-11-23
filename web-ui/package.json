@@ -70,5 +70,10 @@
     "dompurify": ">=3.4.13 <4",
     "nanoid@<4": ">=3.3.17 <4",
     "postcss": ">=8.5.23 <9"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "protobufjs@7.6.5": true,
+    "core-js@3.48.0": true
   }
 }
