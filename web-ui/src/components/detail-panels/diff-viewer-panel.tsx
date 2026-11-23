@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Command, CornerDownLeft, MessageSquare, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Command, Copy, CornerDownLeft, MessageSquare, X } from "lucide-react";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
@@ -16,7 +16,9 @@ import {
 	useIncrementalExpand,
 } from "@/components/shared/diff-renderer";
 import { Button } from "@/components/ui/button";
+import { ContextMenuArea, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
 import type { RuntimeWorkspaceFileChange } from "@/runtime/types";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { buildFileTree } from "@/utils/file-tree";
 import { isBinaryFilePath } from "@/utils/is-binary-file-path";
 import { isMacPlatform } from "@/utils/platform";
@@ -838,6 +840,30 @@ export function DiffViewerPanel({
 						{groupedByPath.map((group) => {
 							const isExpanded = expandedPaths[group.path] ?? true;
 							const hasBinaryEntry = group.entries.some((entry) => entry.isBinary);
+							const menuSections: ContextMenuSectionSpec[] = [
+								{
+									id: "copy",
+									items: [
+										{
+											id: "copy-path",
+											label: "Copy path",
+											icon: Copy,
+											onSelect: () => {
+												void copyTextToClipboard(group.path, "Path copied");
+											},
+										},
+										{
+											id: "copy-file-name",
+											label: "Copy file name",
+											icon: Copy,
+											onSelect: () => {
+												const fileName = group.path.split("/").pop() ?? group.path;
+												void copyTextToClipboard(fileName, "File name copied");
+											},
+										},
+									],
+								},
+							];
 							return (
 								<section
 									key={group.path}
@@ -846,42 +872,48 @@ export function DiffViewerPanel({
 									}}
 									style={{ marginTop: 12 }}
 								>
-									<button
-										type="button"
-										className="kb-diff-file-header flex w-full items-center gap-2 rounded-t-md border border-border bg-surface-1 px-2 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-3 active:bg-surface-4 cursor-pointer"
-										aria-expanded={isExpanded}
-										aria-current={selectedPath === group.path ? "true" : undefined}
-										onClick={() => {
-											const container = scrollContainerRef.current;
-											const sectionEl = sectionElementsRef.current[group.path];
-											const previousTop = sectionEl?.getBoundingClientRect().top ?? null;
-											const nextExpanded = !(expandedPaths[group.path] ?? true);
-											suppressScrollSyncUntilRef.current = Date.now() + 250;
-											setExpandedPaths((prev) => ({
-												...prev,
-												[group.path]: nextExpanded,
-											}));
-											requestAnimationFrame(() => {
-												if (previousTop == null || !container || !sectionEl) {
-													return;
-												}
-												const nextTop = sectionEl.getBoundingClientRect().top;
-												container.scrollTop += nextTop - previousTop;
-											});
-										}}
-									>
-										{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-										<span className="truncate" title={group.path} style={{ flex: "1 1 auto", minWidth: 0 }}>
-											{truncatePathMiddle(group.path)}
-										</span>
-										<span style={{ flexShrink: 0 }}>
-											<span className="text-status-green">+{group.added}</span>{" "}
-											<span className="text-status-red">-{group.removed}</span>
-											{group.added === 0 && group.removed === 0 && hasBinaryEntry ? (
-												<span className="ml-2 text-text-tertiary">Binary</span>
-											) : null}
-										</span>
-									</button>
+									<ContextMenuArea sections={menuSections}>
+										<button
+											type="button"
+											className="kb-diff-file-header flex w-full items-center gap-2 rounded-t-md border border-border bg-surface-1 px-2 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-3 active:bg-surface-4 cursor-pointer"
+											aria-expanded={isExpanded}
+											aria-current={selectedPath === group.path ? "true" : undefined}
+											onClick={() => {
+												const container = scrollContainerRef.current;
+												const sectionEl = sectionElementsRef.current[group.path];
+												const previousTop = sectionEl?.getBoundingClientRect().top ?? null;
+												const nextExpanded = !(expandedPaths[group.path] ?? true);
+												suppressScrollSyncUntilRef.current = Date.now() + 250;
+												setExpandedPaths((prev) => ({
+													...prev,
+													[group.path]: nextExpanded,
+												}));
+												requestAnimationFrame(() => {
+													if (previousTop == null || !container || !sectionEl) {
+														return;
+													}
+													const nextTop = sectionEl.getBoundingClientRect().top;
+													container.scrollTop += nextTop - previousTop;
+												});
+											}}
+										>
+											{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+											<span
+												className="truncate"
+												title={group.path}
+												style={{ flex: "1 1 auto", minWidth: 0 }}
+											>
+												{truncatePathMiddle(group.path)}
+											</span>
+											<span style={{ flexShrink: 0 }}>
+												<span className="text-status-green">+{group.added}</span>{" "}
+												<span className="text-status-red">-{group.removed}</span>
+												{group.added === 0 && group.removed === 0 && hasBinaryEntry ? (
+													<span className="ml-2 text-text-tertiary">Binary</span>
+												) : null}
+											</span>
+										</button>
+									</ContextMenuArea>
 									{isExpanded ? (
 										<div
 											className="rounded-b-md border-x border-b border-border bg-surface-1"

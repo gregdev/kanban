@@ -1,6 +1,8 @@
-import { FileText, Folder, FolderOpen } from "lucide-react";
+import { Copy, FileText, Folder, FolderOpen } from "lucide-react";
 import { useMemo } from "react";
+import { ContextMenuArea, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
 import type { RuntimeWorkspaceFileChange } from "@/runtime/types";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { buildFileTree, type FileTreeNode } from "@/utils/file-tree";
 
 interface FileDiffStats {
@@ -27,28 +29,53 @@ function FileTreeRow({
 	const rowClassName = `kb-file-tree-row${isDirectory ? " kb-file-tree-row-directory" : ""}${isSelected ? " kb-file-tree-row-selected" : ""}`;
 	const addedStatClassName = isSelected ? "text-accent-fg" : "text-status-green";
 	const removedStatClassName = isSelected ? "text-accent-fg" : "text-status-red";
+	const menuSections: ContextMenuSectionSpec[] = [
+		{
+			id: "copy",
+			items: [
+				{
+					id: "copy-path",
+					label: "Copy path",
+					icon: Copy,
+					onSelect: () => {
+						void copyTextToClipboard(node.path, "Path copied");
+					},
+				},
+				{
+					id: "copy-name",
+					label: isDirectory ? "Copy folder name" : "Copy file name",
+					icon: Copy,
+					onSelect: () => {
+						void copyTextToClipboard(node.name, isDirectory ? "Folder name copied" : "File name copied");
+					},
+				},
+			],
+		},
+	];
 
 	return (
 		<div>
-			<button
-				type="button"
-				className={rowClassName}
-				style={{ paddingLeft: depth * 12 + 8 }}
-				onClick={() => {
-					if (!isDirectory) {
-						onSelectPath(node.path);
-					}
-				}}
-			>
-				{isDirectory ? <Folder size={14} /> : <FileText size={14} />}
-				<span className="truncate">{node.name}</span>
-				{fileStats ? (
-					<span className="font-mono" style={{ marginLeft: "auto", fontSize: 10, display: "flex", gap: 4 }}>
-						{fileStats.added > 0 ? <span className={addedStatClassName}>+{fileStats.added}</span> : null}
-						{fileStats.removed > 0 ? <span className={removedStatClassName}>-{fileStats.removed}</span> : null}
-					</span>
-				) : null}
-			</button>
+			<ContextMenuArea sections={menuSections}>
+				<button
+					type="button"
+					className={rowClassName}
+					style={{ paddingLeft: depth * 12 + 8 }}
+					onClick={() => {
+						if (!isDirectory) {
+							onSelectPath(node.path);
+						}
+					}}
+				>
+					{isDirectory ? <Folder size={14} /> : <FileText size={14} />}
+					<span className="truncate">{node.name}</span>
+					{fileStats ? (
+						<span className="font-mono" style={{ marginLeft: "auto", fontSize: 10, display: "flex", gap: 4 }}>
+							{fileStats.added > 0 ? <span className={addedStatClassName}>+{fileStats.added}</span> : null}
+							{fileStats.removed > 0 ? <span className={removedStatClassName}>-{fileStats.removed}</span> : null}
+						</span>
+					) : null}
+				</button>
+			</ContextMenuArea>
 			{node.children.length > 0 ? (
 				<div>
 					{node.children.map((child) => (

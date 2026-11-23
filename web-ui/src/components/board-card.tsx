@@ -2,10 +2,24 @@ import { Draggable } from "@hello-pangea/dnd";
 import { getRuntimeAgentCatalogEntry } from "@runtime-agent-catalog";
 import { formatClineToolCallLabel } from "@runtime-cline-tool-call-display";
 import { buildTaskWorktreeDisplayPath } from "@runtime-task-worktree-path";
-import { AlertCircle, AlertTriangle, Bot, GitBranch, Pencil, Play, RotateCcw, Trash2 } from "lucide-react";
+import {
+	AlertCircle,
+	AlertTriangle,
+	Ban,
+	Bot,
+	ExternalLink,
+	GitBranch,
+	GitCommit,
+	GitPullRequest,
+	Pencil,
+	Play,
+	RotateCcw,
+	Trash2,
+} from "lucide-react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ContextMenuArea, type ContextMenuItemSpec, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
 import { NextUpTasksBadge } from "@/components/dependencies/next-up-tasks-badge";
 import {
 	formatClineReasoningEffortLabel,
@@ -473,11 +487,131 @@ export function BoardCard({
 
 	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
 
+	const contextMenuSections = useMemo<ContextMenuSectionSpec[]>(() => {
+		if (isTrashCard) {
+			if (!onRestoreFromTrash) {
+				return [];
+			}
+			return [
+				{
+					id: "restore",
+					items: [
+						{
+							id: "restore",
+							label: "Restore session in new worktree",
+							icon: RotateCcw,
+							onSelect: () => onRestoreFromTrash(card.id),
+						},
+					],
+				},
+			];
+		}
+
+		const sections: ContextMenuSectionSpec[] = [];
+		const primaryItems: ContextMenuItemSpec[] = [];
+		if (onClick) {
+			primaryItems.push({
+				id: "open",
+				label: columnId === "backlog" ? "Edit task" : "Open details",
+				icon: columnId === "backlog" ? Pencil : ExternalLink,
+				onSelect: onClick,
+			});
+		}
+		if (onSaveTitle) {
+			primaryItems.push({
+				id: "rename",
+				label: "Rename task",
+				icon: Pencil,
+				onSelect: () => {
+					setDraftTitle(card.title);
+					setIsEditingTitle(true);
+				},
+			});
+		}
+		if (primaryItems.length > 0) {
+			sections.push({ id: "primary", items: primaryItems });
+		}
+
+		const actionItems: ContextMenuItemSpec[] = [];
+		if (columnId === "backlog" && onStart) {
+			actionItems.push({
+				id: "start",
+				label: "Start task",
+				icon: Play,
+				onSelect: () => onStart(card.id),
+			});
+		}
+		if (showReviewGitActions && onCommit) {
+			actionItems.push({
+				id: "commit",
+				label: "Commit",
+				icon: GitCommit,
+				disabled: isAnyGitActionLoading,
+				onSelect: () => onCommit(card.id),
+			});
+		}
+		if (showReviewGitActions && onOpenPr) {
+			actionItems.push({
+				id: "open-pr",
+				label: "Open PR",
+				icon: GitPullRequest,
+				disabled: isAnyGitActionLoading,
+				onSelect: () => onOpenPr(card.id),
+			});
+		}
+		if (onMoveToTrash) {
+			actionItems.push({
+				id: "move-to-done",
+				label: "Move to Done",
+				icon: Trash2,
+				danger: true,
+				disabled: isMoveToTrashLoading,
+				onSelect: () => onMoveToTrash(card.id),
+			});
+		}
+		if (actionItems.length > 0) {
+			sections.push({ id: "actions", items: actionItems });
+		}
+
+		if (cancelAutomaticActionLabel && onCancelAutomaticAction) {
+			sections.push({
+				id: "automatic",
+				items: [
+					{
+						id: "cancel-automatic",
+						label: cancelAutomaticActionLabel,
+						icon: Ban,
+						onSelect: () => onCancelAutomaticAction(card.id),
+					},
+				],
+			});
+		}
+
+		return sections;
+	}, [
+		cancelAutomaticActionLabel,
+		card.id,
+		card.title,
+		columnId,
+		isAnyGitActionLoading,
+		isMoveToTrashLoading,
+		isTrashCard,
+		onCancelAutomaticAction,
+		onClick,
+		onCommit,
+		onMoveToTrash,
+		onOpenPr,
+		onRestoreFromTrash,
+		onSaveTitle,
+		onStart,
+		showReviewGitActions,
+	]);
+
 	return (
 		<Draggable draggableId={card.id} index={index} isDragDisabled={false}>
 			{(provided, snapshot) => {
 				const isDragging = snapshot.isDragging;
-				const draggableContent = (
+				const cardContent = (
 					<div
 						ref={provided.innerRef}
 						{...provided.draggableProps}
@@ -562,6 +696,9 @@ export function BoardCard({
 											onBlur={submitTitle}
 											onKeyDown={handleTitleKeyDown}
 											onMouseDown={(event) => {
+												event.stopPropagation();
+											}}
+											onContextMenu={(event) => {
 												event.stopPropagation();
 											}}
 											className="h-7 w-full rounded-md border border-border-focus bg-surface-2 px-2 text-sm font-medium text-text-primary focus:outline-none"
@@ -739,7 +876,7 @@ export function BoardCard({
 							) : null}
 							{sessionActivity ? (
 								<div
-									className="flex gap-1.5 items-start mt-[6px]"
+									className="flex gap-1.5 items-start mt-1.5"
 									style={{
 										color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
 									}}
@@ -858,6 +995,8 @@ export function BoardCard({
 						</div>
 					</div>
 				);
+
+				const draggableContent = <ContextMenuArea sections={contextMenuSections}>{cardContent}</ContextMenuArea>;
 
 				if (isDragging && typeof document !== "undefined") {
 					return createPortal(draggableContent, document.body);

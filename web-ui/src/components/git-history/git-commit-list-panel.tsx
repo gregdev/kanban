@@ -1,12 +1,48 @@
-import { ArrowDown, ArrowUp, Cloud, GitBranch, Locate } from "lucide-react";
+import { ArrowDown, ArrowUp, Cloud, Copy, GitBranch, Locate } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { Virtuoso } from "react-virtuoso";
 
 import { DISTINCT_LINE_COLORS } from "@/components/shared/distinct-line-colors";
 import { Button } from "@/components/ui/button";
+import { ContextMenuArea, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
 import { Spinner } from "@/components/ui/spinner";
 import type { RuntimeGitCommit, RuntimeGitRef } from "@/runtime/types";
+import { copyTextToClipboard } from "@/utils/clipboard";
+
+function buildCommitMenuSections(commit: RuntimeGitCommit): ContextMenuSectionSpec[] {
+	return [
+		{
+			id: "copy",
+			items: [
+				{
+					id: "copy-hash",
+					label: "Copy commit SHA",
+					icon: Copy,
+					onSelect: () => {
+						void copyTextToClipboard(commit.hash, "Commit SHA copied");
+					},
+				},
+				{
+					id: "copy-short-hash",
+					label: "Copy short SHA",
+					icon: Copy,
+					onSelect: () => {
+						void copyTextToClipboard(commit.shortHash, "Short SHA copied");
+					},
+				},
+				{
+					id: "copy-message",
+					label: "Copy commit message",
+					icon: Copy,
+					onSelect: () => {
+						void copyTextToClipboard(commit.message, "Commit message copied");
+					},
+				},
+			],
+		},
+	];
+}
 
 function formatRelativeDate(isoDate: string): string {
 	const date = new Date(isoDate);
@@ -440,164 +476,168 @@ export function GitCommitListPanel({
 							const isUpstreamCommit = commit.relation === "upstream";
 
 							return (
-								<button
-									key={commit.hash}
-									type="button"
-									onClick={() => onSelectCommit(commit)}
-									className={isSelected ? "kb-git-commit-row kb-git-commit-row-selected" : "kb-git-commit-row"}
-									style={{
-										position: "relative",
-										display: "flex",
-										alignItems: "center",
-										width: "100%",
-										height: ROW_HEIGHT,
-										padding: 0,
-										paddingLeft: graphRow ? graphContentLeft(graphRow) : GRAPH_LEFT_PAD,
-										border: "none",
-										color: "inherit",
-										textAlign: "left",
-										fontFamily: "inherit",
-										fontSize: 12,
-										cursor: "pointer",
-										gap: 6,
-										borderBottom: "1px solid var(--color-border)",
-										opacity: isSelected || !isUpstreamCommit ? 1 : 0.82,
-									}}
-								>
-									{graphRow ? <GraphSvg row={graphRow} maxLanes={maxLanes} /> : null}
-									<div
+								<ContextMenuArea sections={buildCommitMenuSections(commit)}>
+									<button
+										key={commit.hash}
+										type="button"
+										onClick={() => onSelectCommit(commit)}
+										className={
+											isSelected ? "kb-git-commit-row kb-git-commit-row-selected" : "kb-git-commit-row"
+										}
 										style={{
-											width: 28,
-											height: 28,
-											borderRadius: "50%",
-											background: hashToColor(commit.authorEmail || commit.authorName),
+											position: "relative",
 											display: "flex",
 											alignItems: "center",
-											justifyContent: "center",
-											flexShrink: 0,
-											fontSize: 10,
-											fontWeight: 600,
-											color: "white",
+											width: "100%",
+											height: ROW_HEIGHT,
+											padding: 0,
+											paddingLeft: graphRow ? graphContentLeft(graphRow) : GRAPH_LEFT_PAD,
+											border: "none",
+											color: "inherit",
+											textAlign: "left",
+											fontFamily: "inherit",
+											fontSize: 12,
+											cursor: "pointer",
+											gap: 6,
+											borderBottom: "1px solid var(--color-border)",
+											opacity: isSelected || !isUpstreamCommit ? 1 : 0.82,
 										}}
 									>
-										{getInitials(commit.authorName)}
-									</div>
-									<div
-										style={{
-											flex: 1,
-											minWidth: 0,
-											display: "flex",
-											flexDirection: "column",
-											justifyContent: "center",
-											paddingLeft: 6,
-											paddingRight: 10,
-											gap: 2,
-										}}
-									>
+										{graphRow ? <GraphSvg row={graphRow} maxLanes={maxLanes} /> : null}
 										<div
 											style={{
+												width: 28,
+												height: 28,
+												borderRadius: "50%",
+												background: hashToColor(commit.authorEmail || commit.authorName),
 												display: "flex",
 												alignItems: "center",
-												gap: 6,
-												fontSize: 12,
+												justifyContent: "center",
+												flexShrink: 0,
+												fontSize: 10,
+												fontWeight: 600,
+												color: "white",
 											}}
 										>
-											<span
-												className="kb-line-clamp-1 kb-git-commit-row-meta"
-												style={{ color: "var(--color-text-tertiary)" }}
-											>
-												{commit.authorName}
-											</span>
-											{commit.relation === "selected" ? (
-												<span
-													className="inline-flex items-center shrink-0"
-													style={{
-														color: isSelected
-															? "var(--color-text-primary)"
-															: "var(--color-text-tertiary)",
-													}}
-												>
-													<ArrowUp size={12} />
-												</span>
-											) : commit.relation === "upstream" ? (
-												<span
-													className="inline-flex items-center shrink-0"
-													style={{
-														color: isSelected
-															? "var(--color-text-primary)"
-															: "var(--color-text-tertiary)",
-													}}
-												>
-													<ArrowDown size={12} />
-												</span>
-											) : null}
-											{sortedCommitRefs && sortedCommitRefs.length > 0
-												? sortedCommitRefs.map((ref) => (
-														<span
-															key={ref.name}
-															className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs shrink-0"
-															style={{
-																fontSize: 9,
-																backgroundColor: getRefBadgeBackground(ref, isSelected),
-																color: getRefBadgeColor(ref, isSelected),
-															}}
-														>
-															{ref.type === "detached" ? (
-																<Locate size={10} />
-															) : ref.type === "remote" ? (
-																<Cloud size={10} />
-															) : (
-																<GitBranch size={10} />
-															)}
-															{ref.type === "detached" ? "HEAD" : ref.name}
-														</span>
-													))
-												: null}
-											<span
-												className="kb-git-commit-row-meta"
+											{getInitials(commit.authorName)}
+										</div>
+										<div
+											style={{
+												flex: 1,
+												minWidth: 0,
+												display: "flex",
+												flexDirection: "column",
+												justifyContent: "center",
+												paddingLeft: 6,
+												paddingRight: 10,
+												gap: 2,
+											}}
+										>
+											<div
 												style={{
-													display: "inline-flex",
+													display: "flex",
 													alignItems: "center",
-													flexShrink: 0,
-													marginLeft: "auto",
+													gap: 6,
+													fontSize: 12,
+												}}
+											>
+												<span
+													className="kb-line-clamp-1 kb-git-commit-row-meta"
+													style={{ color: "var(--color-text-tertiary)" }}
+												>
+													{commit.authorName}
+												</span>
+												{commit.relation === "selected" ? (
+													<span
+														className="inline-flex items-center shrink-0"
+														style={{
+															color: isSelected
+																? "var(--color-text-primary)"
+																: "var(--color-text-tertiary)",
+														}}
+													>
+														<ArrowUp size={12} />
+													</span>
+												) : commit.relation === "upstream" ? (
+													<span
+														className="inline-flex items-center shrink-0"
+														style={{
+															color: isSelected
+																? "var(--color-text-primary)"
+																: "var(--color-text-tertiary)",
+														}}
+													>
+														<ArrowDown size={12} />
+													</span>
+												) : null}
+												{sortedCommitRefs && sortedCommitRefs.length > 0
+													? sortedCommitRefs.map((ref) => (
+															<span
+																key={ref.name}
+																className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs shrink-0"
+																style={{
+																	fontSize: 9,
+																	backgroundColor: getRefBadgeBackground(ref, isSelected),
+																	color: getRefBadgeColor(ref, isSelected),
+																}}
+															>
+																{ref.type === "detached" ? (
+																	<Locate size={10} />
+																) : ref.type === "remote" ? (
+																	<Cloud size={10} />
+																) : (
+																	<GitBranch size={10} />
+																)}
+																{ref.type === "detached" ? "HEAD" : ref.name}
+															</span>
+														))
+													: null}
+												<span
+													className="kb-git-commit-row-meta"
+													style={{
+														display: "inline-flex",
+														alignItems: "center",
+														flexShrink: 0,
+														marginLeft: "auto",
+														color: "var(--color-text-tertiary)",
+													}}
+												>
+													{formatRelativeDate(commit.date)}
+												</span>
+											</div>
+											<div
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: 6,
+													fontSize: 12,
 													color: "var(--color-text-tertiary)",
 												}}
 											>
-												{formatRelativeDate(commit.date)}
-											</span>
+												<code
+													className="kb-git-commit-row-meta font-mono"
+													style={{
+														flexShrink: 0,
+													}}
+												>
+													{commit.shortHash}
+												</code>
+												<span
+													className="kb-line-clamp-1 kb-git-commit-row-message"
+													style={{
+														color: isSelected
+															? "var(--color-text-primary)"
+															: isUpstreamCommit
+																? "var(--color-text-secondary)"
+																: "var(--color-text-primary)",
+													}}
+												>
+													{commit.message}
+												</span>
+											</div>
 										</div>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: 6,
-												fontSize: 12,
-												color: "var(--color-text-tertiary)",
-											}}
-										>
-											<code
-												className="kb-git-commit-row-meta font-mono"
-												style={{
-													flexShrink: 0,
-												}}
-											>
-												{commit.shortHash}
-											</code>
-											<span
-												className="kb-line-clamp-1 kb-git-commit-row-message"
-												style={{
-													color: isSelected
-														? "var(--color-text-primary)"
-														: isUpstreamCommit
-															? "var(--color-text-secondary)"
-															: "var(--color-text-primary)",
-												}}
-											>
-												{commit.message}
-											</span>
-										</div>
-									</div>
-								</button>
+									</button>
+								</ContextMenuArea>
 							);
 						}}
 						components={{

@@ -1,11 +1,13 @@
 import { Fzf } from "fzf";
-import { AlertCircle, ArrowDown, ArrowUp, Cloud, FileText, GitBranch, Info, Locate, Search } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, Cloud, Copy, FileText, GitBranch, Info, Locate, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { renderFuzzyHighlightedText } from "@/components/shared/render-fuzzy-highlighted-text";
 import { Button } from "@/components/ui/button";
+import { ContextMenuArea, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { RuntimeGitRef } from "@/runtime/types";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 const ROW_HEIGHT = 30;
 const SELECTED_SUBTLE_TEXT_COLOR = "rgba(255, 255, 255, 0.64)";
@@ -119,6 +121,47 @@ export function GitRefsPanel({
 		(selectedRefName === headBranch?.name || (selectedRefName === null && headBranch?.isHead === true));
 	const closeShortcutLabel = isMacPlatform ? "Command G" : "Control G";
 
+	const buildRefMenuSections = (ref: RuntimeGitRef, canCheckout: boolean): ContextMenuSectionSpec[] => {
+		const refNoun = ref.type === "remote" ? "remote branch" : "branch";
+		return [
+			{
+				id: "checkout",
+				items:
+					canCheckout && onCheckoutRef
+						? [
+								{
+									id: "checkout",
+									label: "Checkout branch",
+									icon: GitBranch,
+									onSelect: () => onCheckoutRef(ref.name),
+								},
+							]
+						: [],
+			},
+			{
+				id: "copy",
+				items: [
+					{
+						id: "copy-name",
+						label: `Copy ${refNoun} name`,
+						icon: Copy,
+						onSelect: () => {
+							void copyTextToClipboard(ref.name, "Branch name copied");
+						},
+					},
+					{
+						id: "copy-sha",
+						label: "Copy commit SHA",
+						icon: Copy,
+						onSelect: () => {
+							void copyTextToClipboard(ref.hash, "Commit SHA copied");
+						},
+					},
+				],
+			},
+		];
+	};
+
 	return (
 		<div
 			style={{
@@ -157,6 +200,7 @@ export function GitRefsPanel({
 								close.
 							</div>
 							<div>Double-click a branch to switch to that branch.</div>
+							<div>Right-click a branch for copy and checkout actions.</div>
 						</div>
 					}
 					side="bottom"
@@ -212,6 +256,7 @@ export function GitRefsPanel({
 							<RefRow
 								isSelected={!isWorkingCopySelected && selectedRefName === detachedRef.name}
 								onSelect={() => onSelectRef(detachedRef)}
+								menuSections={buildRefMenuSections(detachedRef, false)}
 							>
 								<Locate size={12} />
 								<span className="kb-line-clamp-1" style={{ flex: 1 }}>
@@ -221,7 +266,11 @@ export function GitRefsPanel({
 						) : null}
 
 						{headBranch ? (
-							<RefRow isSelected={isHeadBranchSelected} onSelect={() => onSelectRef(headBranch)}>
+							<RefRow
+								isSelected={isHeadBranchSelected}
+								onSelect={() => onSelectRef(headBranch)}
+								menuSections={buildRefMenuSections(headBranch, false)}
+							>
 								<GitBranch size={12} />
 								<span className="kb-line-clamp-1" style={{ flex: 1 }}>
 									{headBranch.name}
@@ -271,6 +320,7 @@ export function GitRefsPanel({
 									isSelected={isSelected}
 									onSelect={() => onSelectRef(ref)}
 									onDoubleClick={onCheckoutRef ? () => onCheckoutRef(ref.name) : undefined}
+									menuSections={buildRefMenuSections(ref, true)}
 								>
 									<GitBranch size={12} />
 									<span className="kb-line-clamp-1" style={{ flex: 1 }}>
@@ -291,7 +341,12 @@ export function GitRefsPanel({
 								{filteredRemoteRefs.map((ref) => {
 									const isSelected = !isWorkingCopySelected && selectedRefName === ref.name;
 									return (
-										<RefRow key={ref.name} isSelected={isSelected} onSelect={() => onSelectRef(ref)}>
+										<RefRow
+											key={ref.name}
+											isSelected={isSelected}
+											onSelect={() => onSelectRef(ref)}
+											menuSections={buildRefMenuSections(ref, false)}
+										>
 											<Cloud size={12} />
 											<span className="kb-line-clamp-1" style={{ flex: 1 }}>
 												{renderFuzzyHighlightedText(
@@ -347,12 +402,14 @@ function RefRow({
 	selectedClassName,
 	onSelect,
 	onDoubleClick,
+	menuSections,
 	children,
 }: {
 	isSelected: boolean;
 	selectedClassName?: string;
 	onSelect: () => void;
 	onDoubleClick?: () => void;
+	menuSections?: ContextMenuSectionSpec[];
 	children: React.ReactNode;
 }): React.ReactElement {
 	const resolvedSelectedClass = selectedClassName ?? "kb-git-ref-row-selected";
@@ -372,30 +429,32 @@ function RefRow({
 				color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
 			}}
 		>
-			<button
-				type="button"
-				onClick={onSelect}
-				onDoubleClick={onDoubleClick}
-				className="kb-git-ref-row-main"
-				style={{
-					display: "flex",
-					alignItems: "center",
-					gap: 6,
-					flex: 1,
-					minWidth: 0,
-					height: "100%",
-					padding: 0,
-					border: "none",
-					background: "transparent",
-					color: "inherit",
-					textAlign: "left",
-					fontFamily: "inherit",
-					fontSize: 12,
-					cursor: "pointer",
-				}}
-			>
-				{children}
-			</button>
+			<ContextMenuArea sections={menuSections ?? []}>
+				<button
+					type="button"
+					onClick={onSelect}
+					onDoubleClick={onDoubleClick}
+					className="kb-git-ref-row-main"
+					style={{
+						display: "flex",
+						alignItems: "center",
+						gap: 6,
+						flex: 1,
+						minWidth: 0,
+						height: "100%",
+						padding: 0,
+						border: "none",
+						background: "transparent",
+						color: "inherit",
+						textAlign: "left",
+						fontFamily: "inherit",
+						fontSize: 12,
+						cursor: "pointer",
+					}}
+				>
+					{children}
+				</button>
+			</ContextMenuArea>
 		</div>
 	);
 }

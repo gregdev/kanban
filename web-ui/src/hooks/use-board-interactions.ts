@@ -81,7 +81,7 @@ export interface UseBoardInteractionsResult {
 	handleDetailTaskDragEnd: (result: DropResult) => void;
 	handleCardSelect: (taskId: string) => void;
 	handleMoveToTrash: () => void;
-	handleMoveReviewCardToTrash: (taskId: string) => void;
+	handleMoveCardToTrash: (taskId: string) => void;
 	handleRestoreTaskFromTrash: (taskId: string) => void;
 	handleCancelAutomaticTaskAction: (taskId: string) => void;
 	handleOpenClearTrash: () => void;
@@ -747,17 +747,21 @@ export function useBoardInteractions({
 		});
 	}, [requestMoveTaskToTrashWithAnimation, selectedCard, setTaskMoveToTrashLoading]);
 
-	const handleMoveReviewCardToTrash = useCallback(
+	const handleMoveCardToTrash = useCallback(
 		(taskId: string) => {
 			if (moveToTrashLoadingByIdRef.current[taskId]) {
 				return;
 			}
+			const columnId = getTaskColumnId(board, taskId);
+			if (!columnId || columnId === "trash") {
+				return;
+			}
 			setTaskMoveToTrashLoading(taskId, true);
-			void requestMoveTaskToTrashWithAnimation(taskId, "review").finally(() => {
+			void requestMoveTaskToTrashWithAnimation(taskId, columnId).finally(() => {
 				setTaskMoveToTrashLoading(taskId, false);
 			});
 		},
-		[requestMoveTaskToTrashWithAnimation, setTaskMoveToTrashLoading],
+		[board, requestMoveTaskToTrashWithAnimation, setTaskMoveToTrashLoading],
 	);
 
 	const handleRestoreTaskFromTrash = useCallback(
@@ -884,7 +888,7 @@ export function useBoardInteractions({
 		handleDetailTaskDragEnd,
 		handleCardSelect,
 		handleMoveToTrash,
-		handleMoveReviewCardToTrash,
+		handleMoveCardToTrash,
 		handleRestoreTaskFromTrash,
 		handleCancelAutomaticTaskAction,
 		handleOpenClearTrash,

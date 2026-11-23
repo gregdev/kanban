@@ -820,4 +820,47 @@ describe("BoardCard", () => {
 
 		expect(container.textContent).not.toContain("Needs input");
 	});
+
+	it("offers column-aware actions in the card context menu", async () => {
+		const onStart = vi.fn();
+		const onMoveToTrash = vi.fn();
+		const onSaveTitle = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="backlog"
+					onClick={() => {}}
+					onSaveTitle={onSaveTitle}
+					onStart={onStart}
+					onMoveToTrash={onMoveToTrash}
+				/>,
+			);
+		});
+
+		const card = container.querySelector('[data-task-id="task-1"]');
+		expect(card).toBeInstanceOf(HTMLElement);
+
+		await act(async () => {
+			card?.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					bubbles: true,
+					cancelable: true,
+					clientX: 10,
+					clientY: 10,
+				}),
+			);
+		});
+
+		const menuItemLabels = Array.from(document.body.querySelectorAll('[role="menuitem"]')).map((item) =>
+			item.textContent?.trim(),
+		);
+		expect(menuItemLabels).toContain("Edit task");
+		expect(menuItemLabels).toContain("Rename task");
+		expect(menuItemLabels).toContain("Start task");
+		expect(menuItemLabels).toContain("Move to Done");
+		expect(menuItemLabels).not.toContain("Open PR");
+	});
 });

@@ -1,14 +1,51 @@
-import { X } from "lucide-react";
+import { Copy, Trash2, X } from "lucide-react";
 import type { ReactElement } from "react";
 import { cn } from "@/components/ui/cn";
+import { ContextMenuArea, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { TaskImage } from "@/types";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 interface TaskImageStripProps {
 	images: TaskImage[];
 	onRemoveImage?: (imageId: string) => void;
 	className?: string;
 	label?: string | null;
+}
+
+function buildImageMenuSections(image: TaskImage, onRemoveImage?: (imageId: string) => void): ContextMenuSectionSpec[] {
+	const sections: ContextMenuSectionSpec[] = [];
+	if (onRemoveImage) {
+		sections.push({
+			id: "remove",
+			items: [
+				{
+					id: "remove",
+					label: "Remove image",
+					icon: Trash2,
+					danger: true,
+					onSelect: () => onRemoveImage(image.id),
+				},
+			],
+		});
+	}
+	sections.push({
+		id: "copy",
+		items: [
+			{
+				id: "copy-name",
+				label: "Copy file name",
+				icon: Copy,
+				disabled: !image.name,
+				onSelect: () => {
+					if (image.name) {
+						void copyTextToClipboard(image.name, "File name copied");
+					}
+				},
+			},
+		],
+	});
+	return sections;
 }
 
 export function TaskImageStrip({
@@ -27,9 +64,14 @@ export function TaskImageStrip({
 				<div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">{label}</div>
 			) : null}
 			<div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
-				{images.map((image) => {
-					const preview = (
-						<>
+				{images.map((image) => (
+					<ContextMenuArea key={image.id} sections={buildImageMenuSections(image, onRemoveImage)}>
+						<div
+							className={cn(
+								"group inline-flex max-w-65 min-w-0 items-center gap-1.5 rounded-md border border-border-bright bg-surface-2 px-1.5 py-1",
+								onRemoveImage && "hover:border-border-focus",
+							)}
+						>
 							<img
 								src={`data:${image.mimeType};base64,${image.data}`}
 								alt={image.name ?? "attached image"}
@@ -39,37 +81,20 @@ export function TaskImageStrip({
 								{image.name ?? "Image"}
 							</span>
 							{onRemoveImage ? (
-								<X size={12} className="shrink-0 text-text-tertiary group-hover:text-accent" />
+								<Tooltip content="Remove image" side="bottom">
+									<button
+										type="button"
+										onClick={() => onRemoveImage(image.id)}
+										aria-label={`Remove ${image.name ?? "image"}`}
+										className="shrink-0 cursor-pointer rounded-sm p-0 text-text-tertiary hover:text-status-red focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+									>
+										<X size={12} />
+									</button>
+								</Tooltip>
 							) : null}
-						</>
-					);
-
-					if (!onRemoveImage) {
-						return (
-							<div
-								key={image.id}
-								className="inline-flex max-w-[260px] min-w-0 items-center gap-1.5 rounded-md border border-border-bright bg-surface-2 px-1.5 py-1"
-							>
-								{preview}
-							</div>
-						);
-					}
-
-					return (
-						<Tooltip key={image.id} content="Click to delete">
-							<button
-								type="button"
-								onClick={() => onRemoveImage(image.id)}
-								className={cn(
-									"group inline-flex max-w-[260px] min-w-0 cursor-pointer items-center gap-1.5 rounded-md border border-border-bright bg-surface-2 px-1.5 py-1 hover:border-border-focus",
-								)}
-								aria-label={`Delete ${image.name ?? "image"}`}
-							>
-								{preview}
-							</button>
-						</Tooltip>
-					);
-				})}
+						</div>
+					</ContextMenuArea>
+				))}
 			</div>
 		</div>
 	);
