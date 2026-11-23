@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
 	analyzeFenceLines,
-	computeFenceAutoClose,
+	computeFenceAutoPair,
+	computeFencePairBackspaceChange,
 	findFenceNavigationTarget,
+	planFenceNewline,
 	parseFenceDelimiter,
 	splitLineRanges,
 } from "@/components/prompt-composer/fence-analysis";
@@ -73,28 +75,108 @@ describe("analyzeFenceLines", () => {
 	});
 });
 
-describe("computeFenceAutoClose", () => {
+describe("planFenceNewline", () => {
 	it("closes an untouched opener and parks the caret on the content line", () => {
-		const edit = computeFenceAutoClose("```", 3);
-		expect(edit).toEqual({ insert: "\n\n```\n", caretOffset: 1 });
+		const plan = planFenceNewline("```", 3);
+		expect(plan).toEqual({ insert: "\n\n```\n", caretOffset: 1 });
 	});
 
 	it("preserves the fence length and character", () => {
-		expect(computeFenceAutoClose("~~~py", 5)?.insert).toBe("\n\n~~~\n");
-		expect(computeFenceAutoClose("````", 4)?.insert).toBe("\n\n````\n");
+		expect(planFenceNewline("~~~py", 5)?.insert).toBe("\n\n~~~\n");
+		expect(planFenceNewline("````", 4)?.insert).toBe("\n\n````\n");
 	});
 
 	it("does nothing away from the end of the line", () => {
-		expect(computeFenceAutoClose("```", 2)).toBeNull();
+		expect(planFenceNewline("```", 2)).toBeNull();
 	});
 
 	it("does nothing on prose or on a closing fence", () => {
-		expect(computeFenceAutoClose("hello", 5)).toBeNull();
-		expect(computeFenceAutoClose("```\ncode\n```", 10)).toBeNull();
+		expect(planFenceNewline("hello", 5)).toBeNull();
+		expect(planFenceNewline("```\ncode\n```", 10)).toBeNull();
 	});
 
 	it("only closes the opener, not a second fence inside an open block", () => {
-		expect(computeFenceAutoClose("```\ncode\n```\ntail", 8)).toBeNull();
+		expect(planFenceNewline("```\ncode\n```\ntail", 8)).toBeNull();
+	});
+
+	it("steps into an auto-paired block instead of adding a second closer", () => {
+		expect(planFenceNewline("```\n\n```\n", 3)).toEqual({ insert: "", caretOffset: 1 });
+		expect(planFenceNewline("```ts\n\n```\n", 5)).toEqual({ insert: "", caretOffset: 1 });
+	});
+
+	it("leaves a paired block that already holds code to a plain newline", () => {
+		expect(planFenceNewline("```\ncode\n```\n", 3)).toBeNull();
+		expect(planFenceNewline("```ts\ncode\n```\n", 5)).toBeNull();
+	});
+});
+
+describe("computeFenceAutoPair", () => {
+	it("pairs a fence the keystroke just completed", () => {
+		expect(computeFenceAutoPair("```", 2, 1)).toEqual({ insert: "\n\n```\n", caretOffset: 0 });
+	});
+
+	it("keeps the caret after the delimiter so an info string can follow", () => {
+		// Typing ``` leaves the caret at offset 3; `ts` then becomes the info string.
+		const edit = computeFenceAutoPair("```", 2, 1);
+		expect(3 + (edit?.caretOffset ?? 0)).toBe(3);
+	});
+
+	it("mirrors the fence character and length", () => {
+		expect(computeFenceAutoPair("~~~", 2, 1)?.insert).toBe("\n\n~~~\n");
+		// A batch insert of the whole run (an IME or a synthetic edit) pairs once.
+		expect(computeFenceAutoPair("````", 0, 4)?.insert).toBe("\n\n````\n");
+	});
+
+	it("allows up to three leading spaces", () => {
+		expect(computeFenceAutoPair("   ```", 5, 1)?.insert).toBe("\n\n```\n");
+	});
+
+	it("ignores prose, indented code and mid-line runs", () => {
+		expect(computeFenceAutoPair("foo```", 5, 1)).toBeNull();
+		expect(computeFenceAutoPair("    ```", 6, 1)).toBeNull();
+		expect(computeFenceAutoPair("``", 1, 1)).toBeNull();
+	});
+
+	it("does not pair a delimiter typed inside an open fence", () => {
+		expect(computeFenceAutoPair("```\ncode\n```", 11, 1)).toBeNull();
+	});
+
+	it("resizes the paired closer when the opener's run grows", () => {
+		expect(computeFenceAutoPair("````\n\n```\n", 3, 1)).toEqual({
+			insert: "",
+			caretOffset: 0,
+			replace: { from: 6, to: 9, insert: "````" },
+		});
+	});
+
+	it("leaves a closed block that already holds code alone", () => {
+		expect(computeFenceAutoPair("````\ncode\n```\n", 3, 1)).toBeNull();
+	});
+
+	it("does not pair the same opener twice", () => {
+		expect(computeFenceAutoPair("````\n\n````\n", 3, 1)).toBeNull();
+	});
+});
+
+describe("computeFencePairBackspaceChange", () => {
+	it("removes the pair once the opener stops being a fence", () => {
+		const text = "```\n\n```\n";
+		expect(computeFencePairBackspaceChange(text, 3)).toEqual({ from: 3, to: 8, insert: "" });
+	});
+
+	it("shortens the paired closer while the opener is still a fence", () => {
+		const text = "````\n\n````\n";
+		expect(computeFencePairBackspaceChange(text, 4)).toEqual({ from: 6, to: 10, insert: "```" });
+	});
+
+	it("ignores openers with an info string or with code in the block", () => {
+		expect(computeFencePairBackspaceChange("```ts\n\n```\n", 5)).toBeNull();
+		expect(computeFencePairBackspaceChange("```\ncode\n```\n", 3)).toBeNull();
+	});
+
+	it("ignores prose and the middle of a line", () => {
+		expect(computeFencePairBackspaceChange("```\n\n```\n", 2)).toBeNull();
+		expect(computeFencePairBackspaceChange("hello", 5)).toBeNull();
 	});
 });
 

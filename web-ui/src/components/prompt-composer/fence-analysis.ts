@@ -37,11 +37,40 @@ export interface FenceLineRange {
 	text: string;
 }
 
-export interface FenceAutoCloseEdit {
+/**
+ * What pressing Enter on an opening fence line should do: either close the block
+ * (inserting the closing delimiter) or step into an already-closed empty block.
+ */
+export interface FenceNewlinePlan {
 	/** Text to insert at the caret. */
 	insert: string;
 	/** Caret position relative to the insertion point, after inserting. */
 	caretOffset: number;
+}
+
+/**
+ * The edit that keeps an auto-paired fence consistent with what the user typed.
+ * `replace` is set instead of a pure insertion when the opener's delimiter grew
+ * or shrank, so the closing delimiter has to be rewritten to stay valid.
+ */
+export interface FencePairEdit {
+	/** Text appended immediately after the typed fence character. */
+	insert: string;
+	/** Caret position relative to the end of the typed character, after the edit. */
+	caretOffset: number;
+	/** Closing fence to rewrite in the same transaction. */
+	replace?: { from: number; to: number; insert: string };
+}
+
+/** The auto-paired shape: an opening delimiter, a blank line, then a delimiter. */
+export interface FencePairClose {
+	/** Line index of the closing delimiter. */
+	lineIndex: number;
+	/** Offset of the first character of the closing delimiter line. */
+	from: number;
+	/** Offset of the end of the closing delimiter line. */
+	to: number;
+	delimiter: FenceDelimiter;
 }
 
 export interface FenceNavigationTarget {
@@ -126,7 +155,7 @@ export function analyzeFenceLines(text: string): FenceLineState[] {
 	return states;
 }
 
-function findLineIndex(lines: readonly FenceLineRange[], position: number): number {
+export function findLineIndex(lines: readonly FenceLineRange[], position: number): number {
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = lines[index];
 		if (line && position <= line.end) {
@@ -150,10 +179,47 @@ function normalizeCaretPosition(text: string, lines: readonly FenceLineRange[], 
 }
 
 /**
- * When the caret sits at the end of an unmatched fence opener, return the edit
- * that closes the block and leaves an empty line for its contents.
+ * The closing delimiter that pairs with the opener on `openerLineIndex`, when the
+ * line right after the opener is still blank. That is the exact shape the editor
+ * inserts when it auto-pairs a fence, and the shape the caret enters on Enter.
  */
-export function computeFenceAutoClose(text: string, position: number): FenceAutoCloseEdit | null {
+export function findPairedClosingFence(text: string, openerLineIndex: number): FencePairClose | null {
+	const lines = splitLineRanges(text);
+	const content = lines[openerLineIndex + 1];
+	const closer = lines[openerLineIndex + 2];
+	if (!content || !closer || content.text.trim().length > 0) {
+		return null;
+	}
+	const openerDelimiter = parseFenceDelimiter(lines[openerLineIndex]?.text ?? "");
+	const closerDelimiter = parseFenceDelimiter(closer.text);
+	if (!openerDelimiter || !closerDelimiter) {
+		return null;
+	}
+	if (closerDelimiter.char !== openerDelimiter.char || closerDelimiter.info.trim().length > 0) {
+		return null;
+	}
+	return { lineIndex: openerLineIndex + 2, from: closer.start, to: closer.end, delimiter: closerDelimiter };
+}
+
+/** Index of the line that closes the fence opened at `openerLineIndex`, if any. */
+export function findClosingLineIndex(states: readonly FenceLineState[], openerLineIndex: number): number | null {
+	for (let index = openerLineIndex + 1; index < states.length; index += 1) {
+		if (states[index]?.isClosingMarker) {
+			return index;
+		}
+	}
+	return null;
+}
+
+/**
+ * What Enter on an opening fence line should do.
+ *
+ * - An unmatched opener still gets its closing delimiter plus a blank content line.
+ * - An opener that already has a blank content line and its closing delimiter (the
+ *   auto-paired shape) only has to move the caret into the block.
+ * - An opener whose block already holds code falls through to a plain newline.
+ */
+export function planFenceNewline(text: string, position: number): FenceNewlinePlan | null {
 	const lines = splitLineRanges(text);
 	const caret = normalizeCaretPosition(text, lines, position);
 	const lineIndex = findLineIndex(lines, caret);
@@ -165,12 +231,91 @@ export function computeFenceAutoClose(text: string, position: number): FenceAuto
 	if (!delimiter) {
 		return null;
 	}
+	const states = analyzeFenceLines(text);
+	if (!states[lineIndex]?.isOpeningMarker) {
+		return null;
+	}
+	const closingIndex = findClosingLineIndex(states, lineIndex);
+	if (closingIndex === null) {
+		const closing = delimiter.char.repeat(delimiter.length);
+		return { insert: `\n\n${closing}\n`, caretOffset: 1 };
+	}
+	const hasContent = lines.slice(lineIndex + 1, closingIndex).some((entry) => entry.text.trim().length > 0);
+	return hasContent ? null : { insert: "", caretOffset: 1 };
+}
+
+/**
+ * After a fence character was typed, decide whether the editor should also pair
+ * (or re-size) the closing delimiter.
+ *
+ * `text` is the document *including* the typed characters, `typedFrom` is where
+ * they landed and `typedLength` how many there were. A pair is only created when
+ * that keystroke is what turned the line into a delimiter, so typing a backtick
+ * inside an existing fence (which closes it) never spawns a second one.
+ */
+export function computeFenceAutoPair(text: string, typedFrom: number, typedLength: number): FencePairEdit | null {
+	const lines = splitLineRanges(text);
+	const caret = typedFrom + typedLength;
+	const lineIndex = findLineIndex(lines, caret);
+	const line = lines[lineIndex];
+	if (!line || caret !== line.end) {
+		return null;
+	}
+	const after = parseFenceDelimiter(line.text);
+	if (!after) {
+		return null;
+	}
+	const offsetInLine = typedFrom - line.start;
+	const beforeText = line.text.slice(0, offsetInLine) + line.text.slice(offsetInLine + typedLength);
+	const before = parseFenceDelimiter(beforeText);
 	const state = analyzeFenceLines(text)[lineIndex];
 	if (!state?.isOpeningMarker) {
 		return null;
 	}
-	const closing = delimiter.char.repeat(delimiter.length);
-	return { insert: `\n\n${closing}\n`, caretOffset: 1 };
+	const paired = findPairedClosingFence(text, lineIndex);
+	const marker = after.char.repeat(after.length);
+	if (!before) {
+		// The typed run completed the opening delimiter: pair it immediately.
+		return paired ? null : { insert: `\n\n${marker}\n`, caretOffset: 0 };
+	}
+	if (paired && paired.delimiter.length !== after.length) {
+		// The opener's run grew or shrank: keep the paired closer the same length.
+		return { insert: "", caretOffset: 0, replace: { from: paired.from, to: paired.to, insert: marker } };
+	}
+	return null;
+}
+
+/**
+ * Backspace at the end of an opener's delimiter must keep the auto-paired closer
+ * in step: shorten it, and drop the whole pair once the opener stops being a
+ * fence (an orphan closing delimiter would restyle the rest of the draft).
+ */
+export function computeFencePairBackspaceChange(
+	text: string,
+	position: number,
+): { from: number; to: number; insert: string } | null {
+	const lines = splitLineRanges(text);
+	const lineIndex = findLineIndex(lines, position);
+	const line = lines[lineIndex];
+	if (!line || position !== line.end) {
+		return null;
+	}
+	const delimiter = parseFenceDelimiter(line.text);
+	if (!delimiter || delimiter.info.length > 0) {
+		return null;
+	}
+	if (!analyzeFenceLines(text)[lineIndex]?.isOpeningMarker) {
+		return null;
+	}
+	const paired = findPairedClosingFence(text, lineIndex);
+	if (!paired) {
+		return null;
+	}
+	const nextLength = delimiter.length - 1;
+	if (nextLength >= 3) {
+		return { from: paired.from, to: paired.to, insert: delimiter.char.repeat(nextLength) };
+	}
+	return { from: line.end, to: paired.to, insert: "" };
 }
 
 /**

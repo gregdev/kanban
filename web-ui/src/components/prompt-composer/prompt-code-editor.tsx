@@ -1,8 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import type { Range } from "@codemirror/state";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
-import type { DecorationSet, ViewUpdate } from "@codemirror/view";
-import { Decoration, EditorView, keymap, placeholder as cmPlaceholder, ViewPlugin } from "@codemirror/view";
+import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
 import {
 	type CSSProperties,
 	forwardRef,
@@ -15,10 +13,13 @@ import {
 } from "react";
 
 import {
-	analyzeFenceLines,
-	computeFenceAutoClose,
+	computeFenceAutoPair,
+	computeFencePairBackspaceChange,
 	findFenceNavigationTarget,
+	planFenceNewline,
 } from "@/components/prompt-composer/fence-analysis";
+import { buildBacktickWrapEdit } from "@/components/prompt-composer/inline-code-analysis";
+import { markdownHighlighting } from "@/components/prompt-composer/markdown-decorations";
 import { cn } from "@/components/ui/cn";
 
 export interface PromptCodeEditorHandle {
@@ -55,39 +56,71 @@ export interface PromptCodeEditorProps {
 const editableCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
 
-function buildFenceDecorations(view: EditorView): DecorationSet {
-	const states = analyzeFenceLines(view.state.doc.toString());
-	const decorations: Range<Decoration>[] = [];
-	for (let index = 0; index < states.length; index += 1) {
-		const state = states[index];
-		if (!state?.inFence) {
-			continue;
-		}
-		const line = view.state.doc.line(index + 1);
-		decorations.push(
-			Decoration.line({ class: state.isFenceMarker ? "cm-code-fence" : "cm-code-line" }).range(line.from),
-		);
-	}
-	return Decoration.set(decorations, true);
+const FENCE_CHARACTERS = new Set(["`", "~"]);
+
+/** True when `text` is a run of one fence character, e.g. "`" or "~~~". */
+function isFenceRun(text: string): boolean {
+	const char = text[0];
+	return (
+		text.length > 0 &&
+		char !== undefined &&
+		FENCE_CHARACTERS.has(char) &&
+		text.split("").every((entry) => entry === char)
+	);
 }
 
-/** Styles every line inside a fenced code block, so code is mono and never wraps. */
-const fenceHighlighting = ViewPlugin.fromClass(
-	class {
-		decorations: DecorationSet;
-
-		constructor(view: EditorView) {
-			this.decorations = buildFenceDecorations(view);
+/**
+ * Typed-character policy for the composer:
+ *
+ * - a backtick over a selection wraps it in inline code, or in a fenced block when
+ *   the selection spans lines;
+ * - a fence character that completes an opening delimiter (``` or ~~~) also inserts
+ *   the matching closing fence, so no Shift-Enter is needed. The caret stays after
+ *   the typed delimiter, which keeps ```ts working as an info string.
+ *
+ * Exported so tests can exercise the policy without synthesising DOM input events.
+ */
+export function applyComposerTextInput(view: EditorView, from: number, to: number, text: string): boolean {
+	const state = view.state;
+	if (state.readOnly || !isFenceRun(text)) {
+		return false;
+	}
+	const docText = state.doc.toString();
+	if (from !== to) {
+		if (text !== "`") {
+			return false;
 		}
-
-		update(update: ViewUpdate): void {
-			if (update.docChanged || update.viewportChanged) {
-				this.decorations = buildFenceDecorations(update.view);
-			}
+		const edit = buildBacktickWrapEdit(docText, from, to);
+		if (!edit) {
+			return false;
 		}
-	},
-	{ decorations: (plugin) => plugin.decorations },
-);
+		view.dispatch({
+			changes: edit.changes,
+			selection: edit.selection,
+			userEvent: "input.type",
+			scrollIntoView: true,
+		});
+		return true;
+	}
+	const nextText = docText.slice(0, from) + text + docText.slice(from);
+	const pair = computeFenceAutoPair(nextText, from, text.length);
+	if (!pair) {
+		return false;
+	}
+	const changes = pair.replace
+		? [
+				{ from, insert: text },
+				{ from: pair.replace.from, to: pair.replace.to, insert: pair.replace.insert },
+			]
+		: [{ from, insert: text + pair.insert }];
+	view.dispatch({
+		changes,
+		selection: { anchor: from + text.length + pair.caretOffset },
+		userEvent: "input.type",
+		scrollIntoView: true,
+	});
+	return true;
+}
 
 export const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEditorProps>(function PromptCodeEditor(
 	{
@@ -129,14 +162,41 @@ export const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEdi
 			return false;
 		}
 		const position = selection.main.head;
-		const autoClose = computeFenceAutoClose(view.state.doc.toString(), position);
-		if (!autoClose) {
+		const plan = planFenceNewline(view.state.doc.toString(), position);
+		if (!plan) {
 			return false;
 		}
 		view.dispatch({
-			changes: { from: position, insert: autoClose.insert },
-			selection: { anchor: position + autoClose.caretOffset },
+			changes: { from: position, insert: plan.insert },
+			selection: { anchor: position + plan.caretOffset },
 			userEvent: "input",
+			scrollIntoView: true,
+		});
+		return true;
+	}, []);
+
+	/**
+	 * Backspace on an auto-paired fence also shortens (or removes) the closing
+	 * delimiter, so the block cannot be left half-open. Falls through to the default
+	 * deletion everywhere else.
+	 */
+	const runFencePairBackspace = useCallback((view: EditorView): boolean => {
+		const selection = view.state.selection;
+		if (selection.ranges.length !== 1 || !selection.main.empty) {
+			return false;
+		}
+		const position = selection.main.head;
+		if (position === 0) {
+			return false;
+		}
+		const change = computeFencePairBackspaceChange(view.state.doc.toString(), position);
+		if (!change) {
+			return false;
+		}
+		view.dispatch({
+			changes: [{ from: position - 1, to: position, insert: "" }, change],
+			selection: { anchor: position - 1 },
+			userEvent: "delete.backward",
 			scrollIntoView: true,
 		});
 		return true;
@@ -183,9 +243,18 @@ export const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEdi
 					}),
 				),
 				Prec.high(
+					EditorView.inputHandler.of((editorView, from, to, text) => {
+						if (editorView.composing) {
+							return false;
+						}
+						return applyComposerTextInput(editorView, from, to, text);
+					}),
+				),
+				Prec.high(
 					keymap.of([
 						{ key: "Enter", run: runNewline },
 						{ key: "Shift-Enter", run: runNewline },
+						{ key: "Backspace", run: runFencePairBackspace },
 						{ key: "ArrowDown", run: runFenceNavigation("down") },
 						{ key: "ArrowUp", run: runFenceNavigation("up") },
 					]),
@@ -193,7 +262,7 @@ export const PromptCodeEditor = forwardRef<PromptCodeEditorHandle, PromptCodeEdi
 				keymap.of([...historyKeymap, ...defaultKeymap]),
 				history(),
 				EditorView.lineWrapping,
-				fenceHighlighting,
+				markdownHighlighting,
 				EditorView.updateListener.of((update) => {
 					if (update.docChanged) {
 						onChangeRef.current(update.state.doc.toString());

@@ -3,7 +3,7 @@ import React, { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PromptCodeEditor } from "@/components/prompt-composer/prompt-code-editor";
+import { applyComposerTextInput, PromptCodeEditor } from "@/components/prompt-composer/prompt-code-editor";
 
 interface HarnessState {
 	value: string;
@@ -45,7 +45,7 @@ function EditorHarness({
 	);
 }
 
-const KEY_CODES: Record<string, number> = { Enter: 13, ArrowUp: 38, ArrowDown: 40, Escape: 27 };
+const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, ArrowUp: 38, ArrowDown: 40, Escape: 27 };
 
 describe("PromptCodeEditor", () => {
 	let container: HTMLDivElement;
@@ -176,11 +176,119 @@ describe("PromptCodeEditor", () => {
 		expect(view().state.doc.toString()).toBe("hello\n");
 	});
 
-	it("styles fence lines and leaves prose undecorated", () => {
+	it("renders a fenced block as a panel with the delimiters hidden", () => {
 		render(<EditorHarness records={records} initialValue={"before\n```ts\nconst a = 1;\n```\nafter"} />);
 
-		expect(container.querySelectorAll(".cm-code-fence").length).toBe(2);
+		// Both delimiter rows collapse into caps; the code row carries the panel edges.
+		expect(container.querySelectorAll(".cm-code-cap").length).toBe(2);
 		expect(container.querySelectorAll(".cm-code-line").length).toBe(1);
+		expect(container.querySelectorAll(".cm-code-block-top").length).toBe(1);
+		expect(container.querySelectorAll(".cm-code-block-bottom").length).toBe(1);
+		expect(container.querySelector(".cm-code-fence")).toBeNull();
+		// The fence language stays visible as the top cap's label.
+		expect(container.querySelectorAll(".cm-code-cap-labeled").length).toBe(1);
+		expect(container.textContent).toContain("const a = 1;");
+		expect(container.textContent).toContain("ts");
+		expect(container.textContent).not.toContain("```");
+	});
+
+	it("reveals the delimiters when the selection touches the fence", () => {
+		render(<EditorHarness records={records} initialValue={"before\n```ts\nconst a = 1;\n```\nafter"} />);
+		const openerStart = "before\n".length;
+
+		act(() => {
+			view().dispatch({ selection: { anchor: openerStart } });
+		});
+
+		expect(container.querySelectorAll(".cm-code-fence").length).toBe(1);
+		expect(container.querySelectorAll(".cm-code-cap").length).toBe(1);
+		expect(container.textContent).toContain("```ts");
+	});
+
+	it("styles inline code and hides its backticks", () => {
+		render(<EditorHarness records={records} initialValue="use `foo` here" />);
+
+		expect(container.querySelectorAll(".cm-inline-code").length).toBe(1);
+		expect(container.textContent).toContain("use foo here");
+		expect(container.textContent).not.toContain("`");
+	});
+
+	it("reveals inline code backticks while the caret is inside the span", () => {
+		render(<EditorHarness records={records} initialValue="use `foo` here" />);
+
+		act(() => {
+			view().dispatch({ selection: { anchor: 6 } });
+		});
+
+		expect(container.textContent).toContain("`foo`");
+	});
+
+	it("pairs a fence as soon as the third backtick is typed", () => {
+		render(<EditorHarness records={records} />);
+		type("``");
+
+		act(() => {
+			const current = view();
+			const caret = current.state.selection.main.head;
+			applyComposerTextInput(current, caret, caret, "`");
+		});
+
+		expect(view().state.doc.toString()).toBe("```\n\n```\n");
+		// The caret stays after the opener so a language can still be typed.
+		expect(view().state.selection.main.head).toBe(3);
+		expect(records.value).toBe("```\n\n```\n");
+	});
+
+	it("wraps a selection in inline code when a backtick is typed", () => {
+		render(<EditorHarness records={records} initialValue="hello world" />);
+		act(() => {
+			view().dispatch({ selection: { anchor: 6, head: 11 } });
+		});
+
+		act(() => {
+			applyComposerTextInput(view(), 6, 11, "`");
+		});
+
+		expect(view().state.doc.toString()).toBe("hello `world`");
+		const selection = view().state.selection.main;
+		expect(view().state.sliceDoc(selection.from, selection.to)).toBe("world");
+	});
+
+	it("wraps a multi-line selection in a fenced block", () => {
+		render(<EditorHarness records={records} initialValue={"a\nb\nc"} />);
+		act(() => {
+			view().dispatch({ selection: { anchor: 0, head: 3 } });
+		});
+
+		act(() => {
+			applyComposerTextInput(view(), 0, 3, "`");
+		});
+
+		expect(view().state.doc.toString()).toBe("```\na\nb\n```\nc");
+	});
+
+	it("steps into an auto-paired block on Enter instead of adding a closer", () => {
+		render(<EditorHarness records={records} initialValue={"```\n\n```\n"} />);
+		act(() => {
+			view().dispatch({ selection: { anchor: 3 } });
+		});
+
+		press("Enter");
+
+		expect(view().state.doc.toString()).toBe("```\n\n```\n");
+		expect(view().state.selection.main.head).toBe(4);
+	});
+
+	it("drops an auto-paired block when backspace removes the last delimiter character", () => {
+		render(<EditorHarness records={records} initialValue={"```\n\n```\n"} />);
+		act(() => {
+			view().dispatch({ selection: { anchor: 3 } });
+		});
+
+		press("Backspace");
+
+		expect(view().state.doc.toString()).toBe("``\n");
+		expect(view().state.selection.main.head).toBe(2);
 	});
 
 	it("leaves the block on arrow down from the empty content line", () => {
