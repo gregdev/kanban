@@ -36,7 +36,7 @@ import {
 	validatePasscode,
 	validateSession,
 } from "../security/passcode-manager";
-import { loadWorkspaceContextById } from "../state/workspace-state";
+import { loadWorkspaceScopeById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { createTerminalWebSocketBridge } from "../terminal/ws-server";
 import { type RuntimeTrpcContext, type RuntimeTrpcWorkspaceScope, runtimeAppRouter } from "../trpc/app-router";
@@ -123,8 +123,8 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				workspaceScope: null,
 			};
 		}
-		const requestedWorkspaceContext = await loadWorkspaceContextById(requestedWorkspaceId);
-		if (!requestedWorkspaceContext) {
+		const requestedWorkspaceScope = await loadWorkspaceScopeById(requestedWorkspaceId);
+		if (!requestedWorkspaceScope) {
 			return {
 				requestedWorkspaceId,
 				workspaceScope: null,
@@ -133,8 +133,8 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		return {
 			requestedWorkspaceId,
 			workspaceScope: {
-				workspaceId: requestedWorkspaceContext.workspaceId,
-				workspacePath: requestedWorkspaceContext.repoPath,
+				workspaceId: requestedWorkspaceScope.workspaceId,
+				workspacePath: requestedWorkspaceScope.repoPath,
 			},
 		};
 	};

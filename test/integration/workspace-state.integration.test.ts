@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import * as lockfile from "proper-lockfile";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeBoardData, RuntimeTaskSessionSummary } from "../../src/core/api-contract";
@@ -11,6 +12,7 @@ import {
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
 	loadWorkspaceContextById,
+	loadWorkspaceScopeById,
 	loadWorkspaceState,
 	removeWorkspaceIndexEntry,
 	saveWorkspaceState,
@@ -171,6 +173,75 @@ describe.sequential("workspace-state integration", () => {
 				const entriesAfterRemoval = await listWorkspaceIndexEntries();
 				expect(entriesAfterRemoval).toHaveLength(1);
 				expect(entriesAfterRemoval[0]?.workspaceId).toBe(contextB.workspaceId);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("resolves a workspace while the workspace index lock is held by someone else", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-scope-lock-");
+			try {
+				const workspacePath = join(sandboxRoot, "project-locked");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				const release = await lockfile.lock(join(getWorkspacesRootPath(), "index.json"), {
+					realpath: false,
+					retries: 0,
+				});
+				try {
+					// Reads must never wait on the global index lock: holding it used to turn
+					// every concurrent request into "Unknown workspace ID" after the retry budget.
+					expect(await loadWorkspaceScopeById(context.workspaceId)).toEqual({
+						workspaceId: context.workspaceId,
+						repoPath: context.repoPath,
+					});
+					expect(await loadWorkspaceContextById(context.workspaceId)).not.toBeNull();
+					expect((await loadWorkspaceContext(workspacePath)).workspaceId).toBe(context.workspaceId);
+				} finally {
+					await release();
+				}
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("returns null when a workspace id is unknown or its repository disappeared", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-scope-missing-");
+			try {
+				const workspacePath = join(sandboxRoot, "project-removed");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				expect(await loadWorkspaceScopeById("not-a-workspace")).toBeNull();
+
+				rmSync(workspacePath, { recursive: true, force: true });
+				expect(await loadWorkspaceScopeById(context.workspaceId)).toBeNull();
+				expect(await loadWorkspaceContextById(context.workspaceId)).toBeNull();
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("surfaces index failures instead of reporting an unknown workspace", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-scope-corrupt-");
+			try {
+				const workspacePath = join(sandboxRoot, "project-corrupt-index");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				writeFileSync(join(getWorkspacesRootPath(), "index.json"), "{ not valid json");
+
+				await expect(loadWorkspaceContextById(context.workspaceId)).rejects.toThrow(/Malformed JSON/);
 			} finally {
 				cleanup();
 			}

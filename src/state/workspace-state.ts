@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFile, realpath, rm } from "node:fs/promises";
+import { readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
@@ -137,6 +137,19 @@ export interface RuntimeWorkspaceContext {
 
 export interface LoadWorkspaceContextOptions {
 	autoCreateIfMissing?: boolean;
+}
+
+/**
+ * Raised when a registered workspace cannot be resolved because its repository is
+ * gone or is no longer a git repository. Callers treat this as "workspace not found",
+ * while every other failure (I/O errors, a malformed index file, lock timeouts) must
+ * propagate so it is never mistaken for a missing workspace id.
+ */
+export class WorkspaceUnavailableError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "WorkspaceUnavailableError";
+	}
 }
 
 function createEmptyBoard(): RuntimeBoardData {
@@ -485,7 +498,7 @@ function detectGitDefaultBranch(repoPath: string, branches: string[]): string | 
 function detectGitRepositoryInfo(repoPath: string): RuntimeGitRepositoryInfo {
 	const gitRoot = detectGitRoot(repoPath);
 	if (!gitRoot) {
-		throw new Error(`No git repository detected at ${repoPath}`);
+		throw new WorkspaceUnavailableError(`No git repository detected at ${repoPath}`);
 	}
 
 	const currentBranch = detectGitCurrentBranch(repoPath);
@@ -511,7 +524,7 @@ async function resolveWorkspacePath(cwd: string): Promise<string> {
 
 	const gitRoot = detectGitRoot(canonicalCwd);
 	if (!gitRoot) {
-		throw new Error(`No git repository detected at ${canonicalCwd}`);
+		throw new WorkspaceUnavailableError(`No git repository detected at ${canonicalCwd}`);
 	}
 
 	const resolvedGitRoot = resolve(gitRoot);
@@ -548,56 +561,102 @@ export class WorkspaceStateConflictError extends Error {
 	}
 }
 
+function toWorkspaceContext(
+	workspaceId: string,
+	repoPath: string,
+	git: RuntimeGitRepositoryInfo,
+): RuntimeWorkspaceContext {
+	return {
+		repoPath,
+		workspaceId,
+		statePath: getWorkspaceDirectoryPath(workspaceId),
+		git,
+	};
+}
+
+async function resolveExistingWorkspacePath(repoPath: string): Promise<string | null> {
+	try {
+		const info = await stat(repoPath);
+		if (!info.isDirectory()) {
+			return null;
+		}
+		return await realpath(repoPath);
+	} catch {
+		return null;
+	}
+}
+
 export async function loadWorkspaceContext(
 	cwd: string,
 	options: LoadWorkspaceContextOptions = {},
 ): Promise<RuntimeWorkspaceContext> {
 	const repoPath = await resolveWorkspacePath(cwd);
 	const autoCreateIfMissing = options.autoCreateIfMissing ?? true;
+
+	// Fast path: an already-registered project needs neither the index write lock
+	// nor a second git probe while holding it. Taking the lock here used to make
+	// concurrent requests starve each other and surface as "Unknown workspace ID".
+	const existingEntry = findWorkspaceEntry(await readWorkspaceIndex(), repoPath);
+	if (existingEntry) {
+		return toWorkspaceContext(existingEntry.workspaceId, repoPath, detectGitRepositoryInfo(repoPath));
+	}
 	if (!autoCreateIfMissing) {
-		const index = await readWorkspaceIndex();
-		const existingEntry = findWorkspaceEntry(index, repoPath);
-		if (!existingEntry) {
-			throw new Error(`Project ${repoPath} is not added to Kanban yet.`);
-		}
-		return {
-			repoPath,
-			workspaceId: existingEntry.workspaceId,
-			statePath: getWorkspaceDirectoryPath(existingEntry.workspaceId),
-			git: detectGitRepositoryInfo(repoPath),
-		};
+		throw new WorkspaceUnavailableError(`Project ${repoPath} is not added to Kanban yet.`);
 	}
 
+	// Registration is rare, so keep the lock but do the git probing outside it.
+	const git = detectGitRepositoryInfo(repoPath);
 	return await lockedFileSystem.withLock(getWorkspaceIndexLockRequest(), async () => {
-		let index = await readWorkspaceIndex();
-		const existingEntry = findWorkspaceEntry(index, repoPath);
-		const ensured = existingEntry
-			? { index, entry: existingEntry, changed: false }
+		const index = await readWorkspaceIndex();
+		const existingAfterLock = findWorkspaceEntry(index, repoPath);
+		const ensured = existingAfterLock
+			? { index, entry: existingAfterLock, changed: false }
 			: ensureWorkspaceEntry(index, repoPath);
-		index = ensured.index;
 		if (ensured.changed) {
-			await writeWorkspaceIndex(index);
+			await writeWorkspaceIndex(ensured.index);
 		}
-
-		return {
-			repoPath,
-			workspaceId: ensured.entry.workspaceId,
-			statePath: getWorkspaceDirectoryPath(ensured.entry.workspaceId),
-			git: detectGitRepositoryInfo(repoPath),
-		};
+		return toWorkspaceContext(ensured.entry.workspaceId, repoPath, git);
 	});
 }
 
-export async function loadWorkspaceContextById(workspaceId: string): Promise<RuntimeWorkspaceContext | null> {
+export interface RuntimeWorkspaceScopeRef {
+	workspaceId: string;
+	repoPath: string;
+}
+
+/**
+ * Resolves a workspace id to its repository path without spawning git and without
+ * taking the workspace index lock. Per-request tRPC scoping uses this, so it must
+ * stay cheap and contention-free.
+ */
+export async function loadWorkspaceScopeById(workspaceId: string): Promise<RuntimeWorkspaceScopeRef | null> {
 	const index = await readWorkspaceIndex();
 	const entry = index.entries[workspaceId];
 	if (!entry) {
 		return null;
 	}
-	try {
-		return await loadWorkspaceContext(entry.repoPath);
-	} catch {
+	const repoPath = await resolveExistingWorkspacePath(entry.repoPath);
+	if (!repoPath) {
 		return null;
+	}
+	return {
+		workspaceId: entry.workspaceId,
+		repoPath,
+	};
+}
+
+export async function loadWorkspaceContextById(workspaceId: string): Promise<RuntimeWorkspaceContext | null> {
+	const scope = await loadWorkspaceScopeById(workspaceId);
+	if (!scope) {
+		return null;
+	}
+	try {
+		return toWorkspaceContext(scope.workspaceId, scope.repoPath, detectGitRepositoryInfo(scope.repoPath));
+	} catch (error) {
+		if (error instanceof WorkspaceUnavailableError) {
+			return null;
+		}
+		throw error;
 	}
 }
 

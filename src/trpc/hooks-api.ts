@@ -5,7 +5,7 @@ import type {
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract";
 import { parseHookIngestRequest } from "../core/api-validation";
-import { loadWorkspaceContextById } from "../state/workspace-state";
+import { loadWorkspaceScopeById } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints";
 import type { RuntimeTrpcContext } from "./app-router";
@@ -48,8 +48,8 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				const workspaceId = body.workspaceId;
 				const event = body.event;
 				const knownWorkspacePath = deps.getWorkspacePathById(workspaceId);
-				const workspaceContext = knownWorkspacePath ? null : await loadWorkspaceContextById(workspaceId);
-				const workspacePath = knownWorkspacePath ?? workspaceContext?.repoPath ?? null;
+				const workspaceScope = knownWorkspacePath ? null : await loadWorkspaceScopeById(workspaceId);
+				const workspacePath = knownWorkspacePath ?? workspaceScope?.repoPath ?? null;
 				if (!workspacePath) {
 					return {
 						ok: false,

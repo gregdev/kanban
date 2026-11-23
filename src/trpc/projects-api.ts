@@ -11,7 +11,7 @@ import { parseDirectoryListRequest, parseProjectAddRequest, parseProjectRemoveRe
 import {
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
-	loadWorkspaceContextById,
+	loadWorkspaceScopeById,
 	loadWorkspaceState,
 	removeWorkspaceIndexEntry,
 	removeWorkspaceStateFiles,
@@ -71,10 +71,11 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 		},
 		addProject: async (preferredWorkspaceId, input) => {
 			const body = parseProjectAddRequest(input);
-			const preferredWorkspaceContext = preferredWorkspaceId
-				? await loadWorkspaceContextById(preferredWorkspaceId)
+			const preferredWorkspaceScope = preferredWorkspaceId
+				? await loadWorkspaceScopeById(preferredWorkspaceId)
 				: null;
-			const resolveBasePath = preferredWorkspaceContext?.repoPath ?? deps.getActiveWorkspacePath() ?? process.cwd();
+			const resolveBasePath =
+				preferredWorkspaceScope?.repoPath ?? deps.getActiveWorkspacePath() ?? process.cwd();
 			try {
 				let projectPath: string;
 				if (body.gitUrl) {
