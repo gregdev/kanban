@@ -102,6 +102,26 @@ const markdownComponents: Components = {
 	li: ({ className, ...props }) => (
 		<li className={cn("leading-snug wrap-break-word text-sm text-text-primary", className)} {...props} />
 	),
+	// A table cannot shrink below its cells' min-content width, so wide tables (and
+	// any cell holding a long unbreakable token) escape the transcript column and
+	// get clipped. Wrap them in a scroller so the overflow stays reachable.
+	table: ({ className, ...props }) => (
+		<div className="kb-markdown-table">
+			<table className={cn("w-full border-collapse text-sm text-text-primary", className)} {...props} />
+		</div>
+	),
+	th: ({ className, ...props }) => (
+		<th
+			className={cn(
+				"border border-border bg-surface-1 px-2 py-1 text-left font-semibold whitespace-nowrap",
+				className,
+			)}
+			{...props}
+		/>
+	),
+	td: ({ className, ...props }) => (
+		<td className={cn("border border-border px-2 py-1 align-top", className)} {...props} />
+	),
 	a: ({ className, ...props }) => (
 		<a className={cn("text-accent-2 underline", className)} target="_blank" rel="noreferrer" {...props} />
 	),

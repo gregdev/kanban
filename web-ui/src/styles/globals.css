@@ -1161,6 +1161,18 @@ body.kb-dependency-link-mode {
   margin: 0;
 }
 
+/* Tables keep their border box inside this scroller: a table cannot shrink below
+   its cells' min-content width, so a wide table (or a cell holding a long
+   unbreakable token) would otherwise escape the transcript column and be
+   clipped with no way to reach the rest. */
+.kb-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
 .kb-markdown > :first-child {
   margin-top: 0 !important;
 }

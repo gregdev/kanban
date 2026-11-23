@@ -598,6 +598,30 @@ describe("ClineAgentChatPanel", () => {
 		expect(container.textContent).toContain("try again");
 	});
 
+	it("wraps renderer tables so a wide table cannot escape the transcript", async () => {
+		const table = ["| Option | Notes |", "| --- | --- |", "| `alpha` | works well |"].join("\n");
+
+		await act(async () => {
+			renderPanel(
+				root,
+				<ClineAgentChatPanel
+					taskId="task-1"
+					summary={createSummary("idle")}
+					onLoadMessages={async () => [{ id: "assistant-1", role: "assistant", content: table, createdAt: 1 }]}
+				/>,
+			);
+			await Promise.resolve();
+		});
+
+		// A table cannot shrink below its cells' min-content width, so it must live in
+		// a scroll container or the overflow is clipped with no way to reach it.
+		const wrapper = container.querySelector(".kb-markdown-table");
+		expect(wrapper).toBeInstanceOf(HTMLDivElement);
+		expect(wrapper?.querySelector("table")).toBeInstanceOf(HTMLTableElement);
+		expect(wrapper?.querySelector("th")?.textContent).toBe("Option");
+		expect(wrapper?.querySelector("td")?.textContent).toBe("alpha");
+	});
+
 	it("renders newly streamed messages as they arrive", async () => {
 		const initialMessages: ClineChatMessage[] = [
 			{
