@@ -122,6 +122,27 @@
 	--color-accent-2-fg: #FFFFFF;
 }
 
+[data-theme="gruvbox-dark-hard"] {
+	--color-surface-0: #1D2021;
+	--color-surface-1: #282828;
+	--color-surface-2: #32302F;
+	--color-surface-3: #3C3836;
+	--color-surface-4: #504945;
+	--color-border: #3C3836;
+	--color-border-bright: #504945;
+	--color-border-focus: #FE8019;
+	--color-divider: #141617;
+	--color-text-primary: #EBDBB2;
+	--color-text-secondary: #A89984;
+	--color-text-tertiary: #928374;
+	--color-accent: #FE8019;
+	--color-accent-hover: #FE9A44;
+	--color-accent-fg: #1D2021;
+	--color-accent-2: #8EC07C;
+	--color-accent-2-hover: #A9D99A;
+	--color-accent-2-fg: #1D2021;
+}
+
 [data-theme="solarized-dark"] {
 	--color-surface-0: #002B36;
 	--color-surface-1: #073642;

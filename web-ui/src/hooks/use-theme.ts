@@ -12,6 +12,7 @@ export type ThemeId =
 	| "midnight"
 	| "pitch"
 	| "solarized-dark"
+	| "gruvbox-dark-hard"
 	| "light"
 	| "overcast"
 	| "solarized-light"
@@ -88,6 +89,16 @@ export const THEMES: readonly ThemeDefinition[] = [
 		surface: "#002B36",
 		accentFg: "#FFFFFF",
 		accent2Fg: "#FFFFFF",
+	},
+	{
+		id: "gruvbox-dark-hard",
+		label: "Gruvbox Dark Hard",
+		group: "dark",
+		accent: "#FE8019",
+		accent2: "#8EC07C",
+		surface: "#1D2021",
+		accentFg: "#1D2021",
+		accent2Fg: "#1D2021",
 	},
 	/* Light */
 	{
@@ -224,6 +235,15 @@ const TERMINAL_COLORS_BY_THEME: Record<ThemeId, ThemeTerminalColors> = {
 		selectionBackground: "#268BD24D",
 		selectionForeground: "#ffffff",
 		selectionInactiveBackground: "#0E3E4A66",
+		isLightBackground: false,
+	},
+	"gruvbox-dark-hard": {
+		textPrimary: "#EBDBB2",
+		surfacePrimary: "#1D2021",
+		surfaceRaised: "#282828",
+		selectionBackground: "#FE80194D",
+		selectionForeground: "#1D2021",
+		selectionInactiveBackground: "#32302F66",
 		isLightBackground: false,
 	},
 	light: {
