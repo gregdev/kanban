@@ -1,0 +1,231 @@
+import { EditorView } from "@codemirror/view";
+import React, { act, type ReactElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PromptCodeEditor } from "@/components/prompt-composer/prompt-code-editor";
+
+interface HarnessState {
+	value: string;
+	cursors: number[];
+}
+
+function EditorHarness({
+	initialValue = "",
+	onChange,
+	disabled,
+	onKeyDown,
+	placeholder = "Describe the task",
+	records,
+}: {
+	initialValue?: string;
+	onChange?: (value: string) => void;
+	disabled?: boolean;
+	onKeyDown?: (event: KeyboardEvent, view: EditorView) => boolean;
+	placeholder?: string;
+	records: HarnessState;
+}): ReactElement {
+	const [value, setValue] = React.useState(initialValue);
+	return (
+		<PromptCodeEditor
+			value={value}
+			ariaLabel="Prompt"
+			placeholder={placeholder}
+			disabled={disabled}
+			onKeyDown={onKeyDown}
+			onChange={(next) => {
+				records.value = next;
+				onChange?.(next);
+				setValue(next);
+			}}
+			onSelectionChange={(cursor) => {
+				records.cursors.push(cursor);
+			}}
+		/>
+	);
+}
+
+const KEY_CODES: Record<string, number> = { Enter: 13, ArrowUp: 38, ArrowDown: 40, Escape: 27 };
+
+describe("PromptCodeEditor", () => {
+	let container: HTMLDivElement;
+	let root: Root;
+	let records: HarnessState;
+	let previousActEnvironment: boolean | undefined;
+
+	beforeEach(() => {
+		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
+			.IS_REACT_ACT_ENVIRONMENT;
+		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		records = { value: "", cursors: [] };
+		container = document.createElement("div");
+		document.body.appendChild(container);
+		root = createRoot(container);
+	});
+
+	afterEach(() => {
+		act(() => {
+			root.unmount();
+		});
+		container.remove();
+		if (previousActEnvironment === undefined) {
+			delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+		} else {
+			(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+				previousActEnvironment;
+		}
+	});
+
+	function render(panel: ReactElement): void {
+		act(() => {
+			root.render(panel);
+		});
+	}
+
+	function view(): EditorView {
+		const editor = container.querySelector<HTMLElement>(".cm-editor");
+		if (!editor) {
+			throw new Error("Expected a CodeMirror editor");
+		}
+		const found = EditorView.findFromDOM(editor);
+		if (!found) {
+			throw new Error("Expected an attached EditorView");
+		}
+		return found;
+	}
+
+	function type(text: string): void {
+		act(() => {
+			const current = view();
+			current.dispatch({
+				changes: { from: 0, to: current.state.doc.length, insert: text },
+				selection: { anchor: text.length },
+			});
+		});
+	}
+
+	function press(key: string, init: KeyboardEventInit = {}): void {
+		const content = container.querySelector(".cm-content");
+		if (!content) {
+			throw new Error("Expected editor content");
+		}
+		act(() => {
+			content.dispatchEvent(
+				new KeyboardEvent("keydown", {
+					key,
+					keyCode: KEY_CODES[key] ?? 0,
+					bubbles: true,
+					cancelable: true,
+					...init,
+				}),
+			);
+		});
+	}
+
+	it("renders a placeholder and reports edits", () => {
+		render(<EditorHarness records={records} />);
+		expect(container.textContent).toContain("Describe the task");
+
+		act(() => {
+			const current = view();
+			current.dispatch({ changes: { from: 0, insert: "hello" }, selection: { anchor: 5 } });
+		});
+
+		expect(records.value).toBe("hello");
+		expect(view().state.doc.toString()).toBe("hello");
+		expect(container.textContent).not.toContain("Describe the task");
+	});
+
+	it("accepts value changes pushed from the parent", () => {
+		render(<EditorHarness records={records} initialValue="first" />);
+		expect(view().state.doc.toString()).toBe("first");
+
+		act(() => {
+			root.render(
+				<div>
+					<PromptCodeEditor value="second" ariaLabel="Prompt" onChange={() => {}} />
+				</div>,
+			);
+		});
+
+		expect(view().state.doc.toString()).toBe("second");
+	});
+
+	it("closes a fence when the opener is followed by a newline", () => {
+		render(<EditorHarness records={records} />);
+		type("```");
+
+		press("Enter", { shiftKey: true });
+
+		expect(view().state.doc.toString()).toBe("```\n\n```\n");
+		// The caret lands on the empty line inside the block.
+		expect(view().state.selection.main.head).toBe(4);
+	});
+
+	it("keeps the fence language and delimiter length", () => {
+		render(<EditorHarness records={records} />);
+		type("````ts");
+		press("Enter", { shiftKey: true });
+		expect(view().state.doc.toString()).toBe("````ts\n\n````\n");
+	});
+
+	it("inserts a plain newline when the line does not open a fence", () => {
+		render(<EditorHarness records={records} />);
+		type("hello");
+		press("Enter", { shiftKey: true });
+		expect(view().state.doc.toString()).toBe("hello\n");
+	});
+
+	it("styles fence lines and leaves prose undecorated", () => {
+		render(<EditorHarness records={records} initialValue={"before\n```ts\nconst a = 1;\n```\nafter"} />);
+
+		expect(container.querySelectorAll(".cm-code-fence").length).toBe(2);
+		expect(container.querySelectorAll(".cm-code-line").length).toBe(1);
+	});
+
+	it("leaves the block on arrow down from the empty content line", () => {
+		render(<EditorHarness records={records} />);
+		type("```");
+		press("Enter", { shiftKey: true });
+		expect(view().state.selection.main.head).toBe(4);
+
+		press("ArrowDown");
+
+		// Position just past the closing fence, on the trailing empty line.
+		expect(view().state.selection.main.head).toBe(9);
+	});
+
+	it("re-enters the block on arrow up from below the closing fence", () => {
+		render(<EditorHarness records={records} initialValue={"```\nconst a = 1;\n```\nafter"} />);
+		const text = "```\nconst a = 1;\n```\nafter";
+		act(() => {
+			view().dispatch({ selection: { anchor: text.indexOf("after") } });
+		});
+
+		press("ArrowUp");
+
+		expect(view().state.selection.main.head).toBe(text.indexOf("const a = 1;") + "const a = 1;".length);
+	});
+
+	it("lets the host claim a key before the editor acts on it", () => {
+		const onKeyDown = vi.fn(() => true);
+		render(<EditorHarness records={records} onKeyDown={onKeyDown} />);
+		type("send me");
+
+		press("Enter");
+
+		expect(onKeyDown).toHaveBeenCalledTimes(1);
+		expect(view().state.doc.toString()).toBe("send me");
+	});
+
+	it("falls through to the newline keymap when the host declines a key", () => {
+		const onKeyDown = vi.fn(() => false);
+		render(<EditorHarness records={records} onKeyDown={onKeyDown} />);
+		type("line");
+
+		press("Enter");
+
+		expect(onKeyDown).toHaveBeenCalledTimes(1);
+		expect(view().state.doc.toString()).toBe("line\n");
+	});
+});

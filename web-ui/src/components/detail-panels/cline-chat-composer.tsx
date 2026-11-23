@@ -1,44 +1,23 @@
 import { AlertTriangle, ArrowBigUp, Command, SendHorizontal, Square } from "lucide-react";
-import {
-	type ClipboardEvent,
-	type DragEvent,
-	type KeyboardEvent,
-	type ReactElement,
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 
-import {
-	type ActiveClineComposerToken,
-	applyClineComposerCompletion,
-	buildMentionInsertText,
-	buildSlashCommandInsertText,
-	type ClineComposerCompletionSuggestion,
-	detectActiveClineComposerToken,
-} from "@/components/detail-panels/cline-chat-composer-completion";
 import { ClineChatModelSelector } from "@/components/detail-panels/cline-chat-model-selector";
 import { type InlineCompletionItem, InlineCompletionPicker } from "@/components/inline-completion-picker";
+import { PromptCodeEditor, type PromptCodeEditorHandle } from "@/components/prompt-composer/prompt-code-editor";
+import { useComposerCompletion } from "@/components/prompt-composer/use-composer-completion";
+import { useComposerImageAttachments } from "@/components/prompt-composer/use-composer-image-attachments";
 import type { SearchSelectOption } from "@/components/search-select-dropdown";
-import { collectImageFilesFromDataTransfer, extractImagesFromDataTransfer } from "@/components/task-image-input-utils";
 import { TaskImageStrip } from "@/components/task-image-strip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
-import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
-import type { RuntimeClineReasoningEffort, RuntimeSlashCommand, RuntimeTaskSessionMode } from "@/runtime/types";
+import type { RuntimeClineReasoningEffort, RuntimeTaskSessionMode } from "@/runtime/types";
 import type { TaskImage } from "@/types";
 import { isMacPlatform } from "@/utils/platform";
-import { useDebouncedEffect } from "@/utils/react-use";
 
 const CLINE_CHAT_COMPOSER_MAX_HEIGHT = 160;
-const CLINE_CHAT_COMPOSER_COMPLETION_DEBOUNCE_MS = 120;
-const CLINE_CHAT_COMPOSER_FILE_LIMIT = 8;
-const CLINE_CHAT_COMPOSER_COMMAND_LIMIT = 8;
+const CLINE_CHAT_COMPOSER_MIN_HEIGHT = 24;
 
 export function ClineChatComposer({
 	taskId,
@@ -101,56 +80,36 @@ export function ClineChatComposer({
 	attachmentWarningMessage?: string | null;
 	workspaceId?: string | null;
 }): ReactElement {
-	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-	const mentionSearchRequestIdRef = useRef(0);
-	const slashCommandsRequestIdRef = useRef(0);
-	const slashCommandsCacheRef = useRef(new Map<string, RuntimeSlashCommand[]>());
-	const [isDragOver, setIsDragOver] = useState(false);
+	const editorRef = useRef<PromptCodeEditorHandle | null>(null);
 	const [cursorIndex, setCursorIndex] = useState(() => draft.length);
-	const [isCompletionPickerOpen, setIsCompletionPickerOpen] = useState(true);
-	const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(0);
-	const [mentionSuggestions, setMentionSuggestions] = useState<ClineComposerCompletionSuggestion[]>([]);
-	const [slashSuggestions, setSlashSuggestions] = useState<ClineComposerCompletionSuggestion[]>([]);
-	const [isMentionSearchLoading, setIsMentionSearchLoading] = useState(false);
-	const [isSlashSearchLoading, setIsSlashSearchLoading] = useState(false);
 	const canSubmit = canSend && !isModelSaving && (draft.trim().length > 0 || images.length > 0);
+	const attachments = useComposerImageAttachments({ images, onImagesChange });
 
-	const activeToken = useMemo(() => detectActiveClineComposerToken(draft, cursorIndex), [cursorIndex, draft]);
-	const completionSuggestions = useMemo(() => {
-		if (!activeToken) {
-			return [] as ClineComposerCompletionSuggestion[];
-		}
-		return activeToken.kind === "mention" ? mentionSuggestions : slashSuggestions;
-	}, [activeToken, mentionSuggestions, slashSuggestions]);
-	const completionItems: InlineCompletionItem[] = useMemo(
-		() => completionSuggestions.map((s) => ({ id: s.id, label: s.label, detail: s.detail })),
-		[completionSuggestions],
+	const applyCompletion = useCallback(
+		(result: { value: string; cursor: number }) => {
+			const editor = editorRef.current;
+			if (!editor) {
+				onDraftChange(result.value);
+				return;
+			}
+			editor.setContent(result.value, result.cursor);
+		},
+		[onDraftChange],
 	);
-	const isCompletionLoading = activeToken?.kind === "mention" ? isMentionSearchLoading : isSlashSearchLoading;
-	const showCompletionPicker = Boolean(activeToken && isCompletionPickerOpen);
-	const completionLoadingMessage = activeToken?.kind === "mention" ? "Loading files..." : "Loading commands...";
-	const completionEmptyMessage = useMemo(() => {
-		if (!activeToken) {
-			return null;
-		}
-		if (activeToken.kind === "mention" && !workspaceId) {
-			return "Select a workspace to mention files.";
-		}
-		if (activeToken.kind === "mention") {
-			return "No matching files.";
-		}
-		return "No matching commands.";
-	}, [activeToken, workspaceId]);
 
-	useLayoutEffect(() => {
-		const textarea = textareaRef.current;
-		if (!textarea) {
-			return;
-		}
-		textarea.style.height = "auto";
-		textarea.style.height = `${Math.min(textarea.scrollHeight, CLINE_CHAT_COMPOSER_MAX_HEIGHT)}px`;
-		textarea.style.overflowY = textarea.scrollHeight > CLINE_CHAT_COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
-	}, [draft]);
+	const completion = useComposerCompletion({
+		value: draft,
+		cursorIndex,
+		workspaceId,
+		enableSlashCommands: true,
+		onApplyCompletion: applyCompletion,
+	});
+
+	const completionItems: InlineCompletionItem[] = completion.suggestions.map((suggestion) => ({
+		id: suggestion.id,
+		label: suggestion.label,
+		detail: suggestion.detail,
+	}));
 
 	useEffect(() => {
 		if (!canSend) {
@@ -160,224 +119,17 @@ export function ClineChatComposer({
 		if (window.matchMedia("(max-width: 768px)").matches) {
 			return;
 		}
-		textareaRef.current?.focus();
+		editorRef.current?.focus();
 	}, [canSend, taskId]);
 
 	useEffect(() => {
-		setCursorIndex((currentValue) => Math.min(currentValue, draft.length));
+		setCursorIndex((current) => Math.min(current, draft.length));
 	}, [draft.length]);
 
-	useEffect(() => {
-		setSelectedCompletionIndex(0);
-		setIsCompletionPickerOpen(true);
-	}, [activeToken?.kind, activeToken?.query, activeToken?.start]);
-
-	useEffect(() => {
-		if (!activeToken || activeToken.kind !== "mention") {
-			mentionSearchRequestIdRef.current += 1;
-			setMentionSuggestions([]);
-			setIsMentionSearchLoading(false);
-		}
-		if (!activeToken || activeToken.kind !== "slash") {
-			slashCommandsRequestIdRef.current += 1;
-			setSlashSuggestions([]);
-			setIsSlashSearchLoading(false);
-		}
-	}, [activeToken]);
-
-	const appendImages = useCallback(
-		(newImages: TaskImage[]) => {
-			if (!onImagesChange || newImages.length === 0) {
-				return;
-			}
-			onImagesChange([...images, ...newImages]);
-		},
-		[images, onImagesChange],
-	);
-
-	const handleRemoveImage = useCallback(
-		(imageId: string) => {
-			onImagesChange?.(images.filter((image) => image.id !== imageId));
-		},
-		[images, onImagesChange],
-	);
-
-	const handlePaste = useCallback(
-		(event: ClipboardEvent<HTMLTextAreaElement>) => {
-			if (!event.clipboardData) {
-				return;
-			}
-			const imageFiles = collectImageFilesFromDataTransfer(event.clipboardData);
-			if (imageFiles.length === 0) {
-				return;
-			}
-			event.preventDefault();
-			void (async () => {
-				const nextImages = await extractImagesFromDataTransfer(event.clipboardData);
-				appendImages(nextImages);
-			})();
-		},
-		[appendImages],
-	);
-
-	useDebouncedEffect(
-		() => {
-			if (!activeToken || activeToken.kind !== "mention" || !workspaceId) {
-				return;
-			}
-			const requestId = ++mentionSearchRequestIdRef.current;
-			setIsMentionSearchLoading(true);
-			void (async () => {
-				try {
-					const payload = await getRuntimeTrpcClient(workspaceId).workspace.searchFiles.query({
-						query: activeToken.query,
-						limit: CLINE_CHAT_COMPOSER_FILE_LIMIT,
-					});
-					if (requestId !== mentionSearchRequestIdRef.current) {
-						return;
-					}
-					setMentionSuggestions(
-						payload.files.map((file) => ({
-							id: file.path,
-							kind: "mention",
-							label: file.name,
-							detail: file.path,
-							insertText: buildMentionInsertText(file.path),
-						})),
-					);
-				} catch {
-					if (requestId === mentionSearchRequestIdRef.current) {
-						setMentionSuggestions([]);
-					}
-				} finally {
-					if (requestId === mentionSearchRequestIdRef.current) {
-						setIsMentionSearchLoading(false);
-					}
-				}
-			})();
-		},
-		CLINE_CHAT_COMPOSER_COMPLETION_DEBOUNCE_MS,
-		[activeToken, workspaceId],
-	);
-
-	useDebouncedEffect(
-		() => {
-			if (!activeToken || activeToken.kind !== "slash") {
-				return;
-			}
-			const requestKey = workspaceId ?? "__global__";
-			const requestId = ++slashCommandsRequestIdRef.current;
-			const cachedCommands = slashCommandsCacheRef.current.get(requestKey);
-			const applyCommands = (commands: RuntimeSlashCommand[]) => {
-				const query = activeToken.query.trim().toLowerCase();
-				const filteredCommands = commands
-					.filter((command) => {
-						if (query.length === 0) {
-							return true;
-						}
-						const description = command.description?.toLowerCase() ?? "";
-						return command.name.toLowerCase().includes(query) || description.includes(query);
-					})
-					.slice(0, CLINE_CHAT_COMPOSER_COMMAND_LIMIT)
-					.map((command) => ({
-						id: command.name,
-						kind: "slash" as const,
-						label: `/${command.name}`,
-						detail: command.description,
-						insertText: buildSlashCommandInsertText(command.name),
-					}));
-				setSlashSuggestions(filteredCommands);
-			};
-
-			if (cachedCommands) {
-				applyCommands(cachedCommands);
-				return;
-			}
-
-			setIsSlashSearchLoading(true);
-			void (async () => {
-				try {
-					const payload = await getRuntimeTrpcClient(workspaceId).runtime.getClineSlashCommands.query();
-					if (requestId !== slashCommandsRequestIdRef.current) {
-						return;
-					}
-					slashCommandsCacheRef.current.set(requestKey, payload.commands);
-					applyCommands(payload.commands);
-				} catch {
-					if (requestId === slashCommandsRequestIdRef.current) {
-						setSlashSuggestions([]);
-					}
-				} finally {
-					if (requestId === slashCommandsRequestIdRef.current) {
-						setIsSlashSearchLoading(false);
-					}
-				}
-			})();
-		},
-		CLINE_CHAT_COMPOSER_COMPLETION_DEBOUNCE_MS,
-		[activeToken, workspaceId],
-	);
-
-	const applySuggestion = useCallback(
-		(suggestion: ClineComposerCompletionSuggestion, token: ActiveClineComposerToken) => {
-			const next = applyClineComposerCompletion(draft, token, suggestion.insertText);
-			onDraftChange(next.value);
-			window.requestAnimationFrame(() => {
-				const textarea = textareaRef.current;
-				if (!textarea) {
-					return;
-				}
-				textarea.focus();
-				textarea.setSelectionRange(next.cursor, next.cursor);
-				setCursorIndex(next.cursor);
-			});
-		},
-		[draft, onDraftChange],
-	);
-
-	const handleCompletionSelect = useCallback(
-		(item: InlineCompletionItem) => {
-			const suggestion = completionSuggestions.find((s) => s.id === item.id);
-			if (suggestion && activeToken) {
-				applySuggestion(suggestion, activeToken);
-			}
-		},
-		[activeToken, applySuggestion, completionSuggestions],
-	);
-
-	const handleTextareaKeyDown = useCallback(
-		(event: KeyboardEvent<HTMLTextAreaElement>) => {
-			if (event.nativeEvent.isComposing) {
-				return;
-			}
-			const canNavigateCompletions = showCompletionPicker && completionSuggestions.length > 0;
-			if (canNavigateCompletions && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-				event.preventDefault();
-				const direction = event.key === "ArrowDown" ? 1 : -1;
-				setSelectedCompletionIndex((currentValue) => {
-					const nextIndex = currentValue + direction;
-					if (nextIndex < 0) {
-						return completionSuggestions.length - 1;
-					}
-					if (nextIndex >= completionSuggestions.length) {
-						return 0;
-					}
-					return nextIndex;
-				});
-				return;
-			}
-			if (canNavigateCompletions && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) {
-				event.preventDefault();
-				const selectedSuggestion = completionSuggestions[selectedCompletionIndex] ?? completionSuggestions[0];
-				if (selectedSuggestion && activeToken) {
-					applySuggestion(selectedSuggestion, activeToken);
-				}
-				return;
-			}
-			if (event.key === "Escape" && showCompletionPicker) {
-				event.preventDefault();
-				setIsCompletionPickerOpen(false);
-				return;
+	const handleEditorKeyDown = useCallback(
+		(event: KeyboardEvent) => {
+			if (completion.handleCompletionKeyDown(event)) {
+				return true;
 			}
 			if (
 				showModeToggle &&
@@ -388,108 +140,70 @@ export function ClineChatComposer({
 			) {
 				event.preventDefault();
 				onModeChange(mode === "plan" ? "act" : "plan");
-				return;
+				return true;
 			}
 			if (event.key === "Escape") {
 				if (!canCancel) {
-					return;
+					return false;
 				}
 				event.preventDefault();
 				onCancel();
-				return;
+				return true;
 			}
 			if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
-				return;
+				return false;
 			}
 			if (!canSubmit) {
-				return;
+				return false;
 			}
 			event.preventDefault();
 			void onSend();
+			return true;
 		},
-		[
-			activeToken,
-			applySuggestion,
-			canCancel,
-			canSubmit,
-			completionSuggestions,
-			onCancel,
-			onModeChange,
-			onSend,
-			mode,
-			selectedCompletionIndex,
-			showCompletionPicker,
-			showModeToggle,
-		],
-	);
-
-	const handleDrop = useCallback(
-		async (event: DragEvent<HTMLDivElement>) => {
-			event.preventDefault();
-			setIsDragOver(false);
-			const nextImages = await extractImagesFromDataTransfer(event.dataTransfer);
-			appendImages(nextImages);
-		},
-		[appendImages],
+		[canCancel, canSubmit, completion, mode, onCancel, onModeChange, onSend, showModeToggle],
 	);
 
 	return (
 		<div
 			className={cn(
 				"rounded-xl border border-border bg-surface-2 px-3 py-2 focus-within:border-border-focus",
-				isDragOver && "border-border-focus bg-surface-3/50",
+				attachments.isDragOver && "border-border-focus bg-surface-3/50",
 			)}
-			onDragEnter={(event) => {
-				event.preventDefault();
-				setIsDragOver(true);
-			}}
-			onDragOver={(event) => {
-				event.preventDefault();
-				setIsDragOver(true);
-			}}
-			onDragLeave={(event) => {
-				if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-					return;
-				}
-				setIsDragOver(false);
-			}}
-			onDrop={handleDrop}
+			onDragEnter={attachments.handleDragEnter}
+			onDragOver={attachments.handleDragOver}
+			onDragLeave={attachments.handleDragLeave}
+			onDrop={attachments.handleDrop}
 		>
 			<InlineCompletionPicker
-				open={showCompletionPicker}
+				open={completion.showPicker}
 				items={completionItems}
-				selectedIndex={selectedCompletionIndex}
-				onSelectItem={handleCompletionSelect}
-				onHoverItem={setSelectedCompletionIndex}
-				isLoading={isCompletionLoading}
-				loadingMessage={completionLoadingMessage}
-				emptyMessage={completionEmptyMessage}
+				selectedIndex={completion.selectedIndex}
+				onSelectItem={(item) => completion.selectItem(item.id)}
+				onHoverItem={completion.setSelectedIndex}
+				isLoading={completion.isLoading}
+				loadingMessage={completion.loadingMessage}
+				emptyMessage={completion.emptyMessage}
 				side="top"
 			>
-				<textarea
-					ref={textareaRef}
-					value={draft}
-					onChange={(event) => {
-						onDraftChange(event.target.value);
-						setCursorIndex(event.target.selectionStart ?? event.target.value.length);
-					}}
-					onPaste={handlePaste}
-					onKeyDown={handleTextareaKeyDown}
-					onClick={(event) =>
-						setCursorIndex(event.currentTarget.selectionStart ?? event.currentTarget.value.length)
-					}
-					onKeyUp={(event) =>
-						setCursorIndex(event.currentTarget.selectionStart ?? event.currentTarget.value.length)
-					}
-					placeholder={placeholder}
-					disabled={!canSend}
-					rows={1}
-					className="w-full min-h-6 resize-none bg-transparent p-0 text-sm leading-5 text-text-primary placeholder:text-text-tertiary focus:outline-none disabled:opacity-50"
-					style={{ maxHeight: CLINE_CHAT_COMPOSER_MAX_HEIGHT }}
-				/>
+				<div className="min-w-0">
+					<PromptCodeEditor
+						ref={editorRef}
+						value={draft}
+						onChange={onDraftChange}
+						onSelectionChange={setCursorIndex}
+						onKeyDown={handleEditorKeyDown}
+						onPaste={(event) => attachments.handlePaste(event.clipboardData)}
+						placeholder={placeholder}
+						ariaLabel={placeholder}
+						disabled={!canSend}
+						minHeight={CLINE_CHAT_COMPOSER_MIN_HEIGHT}
+						maxHeight={CLINE_CHAT_COMPOSER_MAX_HEIGHT}
+						className="text-sm leading-5 text-text-primary"
+					/>
+				</div>
 			</InlineCompletionPicker>
 			{images.length > 0 ? (
-				<TaskImageStrip images={images} onRemoveImage={handleRemoveImage} className="mt-2" />
+				<TaskImageStrip images={images} onRemoveImage={attachments.removeImage} className="mt-2" />
 			) : null}
 			<div className="mt-2 flex min-w-0 items-center gap-2">
 				<div className="min-w-0 shrink overflow-hidden">

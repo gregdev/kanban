@@ -66,8 +66,9 @@ Object.defineProperty(globalThis, "IntersectionObserver", {
 	value: MockIntersectionObserver,
 });
 
-// jsdom does not implement window.matchMedia. Provide a minimal stub so that
-// hooks like useIsMobile and react-use's useMedia work during tests.
+// jsdom does not implement window.matchMedia or ResizeObserver. Provide minimal
+// stubs so that hooks like useIsMobile and react-use's useMedia work during
+// tests, and so CodeMirror's view layer can measure itself.
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 	Object.defineProperty(window, "matchMedia", {
 		writable: true,
@@ -83,4 +84,49 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 			dispatchEvent: () => false,
 		}),
 	});
+}
+
+class MockResizeObserver implements ResizeObserver {
+	observe(): void {}
+
+	unobserve(): void {}
+
+	disconnect(): void {}
+}
+
+if (typeof globalThis.ResizeObserver !== "function") {
+	Object.defineProperty(globalThis, "ResizeObserver", {
+		writable: true,
+		configurable: true,
+		value: MockResizeObserver,
+	});
+}
+
+// jsdom implements Range but not its geometry helpers. CodeMirror calls
+// `range.getClientRects()` while measuring text, and the resulting TypeError is
+// thrown from a requestAnimationFrame callback, so it surfaces as an unhandled
+// error attributed to whichever test file happens to be running.
+if (typeof Range !== "undefined") {
+	const emptyRectList = (): DOMRectList => {
+		const list = [] as unknown as DOMRectList & DOMRect[];
+		return Object.assign(list, { item: () => null }) as DOMRectList;
+	};
+	const zeroRect = (): DOMRect => ({
+		x: 0,
+		y: 0,
+		width: 0,
+		height: 0,
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
+		toJSON: () => ({}),
+	});
+
+	if (typeof Range.prototype.getClientRects !== "function") {
+		Range.prototype.getClientRects = emptyRectList;
+	}
+	if (typeof Range.prototype.getBoundingClientRect !== "function") {
+		Range.prototype.getBoundingClientRect = zeroRect;
+	}
 }

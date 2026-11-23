@@ -1,29 +1,19 @@
 import { ImagePlus, Paperclip } from "lucide-react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, ReactElement } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, ReactElement } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import {
-	applyClineComposerCompletion,
-	buildMentionInsertText,
-	detectActiveClineComposerToken,
-} from "@/components/detail-panels/cline-chat-composer-completion";
 import { type InlineCompletionItem, InlineCompletionPicker } from "@/components/inline-completion-picker";
-import {
-	ACCEPTED_TASK_IMAGE_INPUT_ACCEPT,
-	collectImageFilesFromDataTransfer,
-	extractImagesFromDataTransfer,
-	fileToTaskImage,
-} from "@/components/task-image-input-utils";
+import { PromptCodeEditor, type PromptCodeEditorHandle } from "@/components/prompt-composer/prompt-code-editor";
+import { useComposerCompletion } from "@/components/prompt-composer/use-composer-completion";
+import { useComposerImageAttachments } from "@/components/prompt-composer/use-composer-image-attachments";
+import { ACCEPTED_TASK_IMAGE_INPUT_ACCEPT, fileToTaskImage } from "@/components/task-image-input-utils";
 import { TaskImageStrip } from "@/components/task-image-strip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
-import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type { TaskImage } from "@/types";
-import { useDebouncedEffect } from "@/utils/react-use";
 
-const FILE_MENTION_LIMIT = 8;
-const MENTION_QUERY_DEBOUNCE_MS = 120;
 const TEXTAREA_MAX_HEIGHT = 200;
+const TEXTAREA_MIN_HEIGHT = 80;
 
 interface TaskPromptComposerProps {
 	id?: string;
@@ -58,271 +48,59 @@ export function TaskPromptComposer({
 	workspaceId = null,
 	showAttachImageButton = true,
 }: TaskPromptComposerProps): ReactElement {
-	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const editorRef = useRef<PromptCodeEditorHandle | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
-	const mentionSearchRequestIdRef = useRef(0);
 	const [cursorIndex, setCursorIndex] = useState(0);
-	const [mentionItems, setMentionItems] = useState<InlineCompletionItem[]>([]);
-	const [mentionInsertTextMap, setMentionInsertTextMap] = useState(new Map<string, string>());
-	const [isMentionSearchLoading, setIsMentionSearchLoading] = useState(false);
-	const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
-	const [isSuggestionPickerOpen, setIsSuggestionPickerOpen] = useState(false);
-	const [isDragOver, setIsDragOver] = useState(false);
+	const attachments = useComposerImageAttachments({ images, onImagesChange });
+	const isEditorDisabled = Boolean(disabled);
 
-	const autoResizeTextarea = useCallback(() => {
-		const textarea = textareaRef.current;
-		if (!textarea) {
-			return;
-		}
-		textarea.style.height = "auto";
-		textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`;
-	}, []);
-
-	useEffect(() => {
-		autoResizeTextarea();
-	}, [autoResizeTextarea, value]);
-
-	const activeToken = useMemo(() => {
-		const token = detectActiveClineComposerToken(value, cursorIndex);
-		if (token && token.kind !== "mention") {
-			return null;
-		}
-		return token;
-	}, [cursorIndex, value]);
-
-	useEffect(() => {
-		if (!enabled || !activeToken) {
-			mentionSearchRequestIdRef.current += 1;
-			setMentionItems([]);
-			setMentionInsertTextMap(new Map());
-			setIsMentionSearchLoading(false);
-		}
-	}, [activeToken, enabled, workspaceId]);
-
-	useDebouncedEffect(
-		() => {
-			if (!enabled || !activeToken || !workspaceId) {
+	const applyCompletion = useCallback(
+		(result: { value: string; cursor: number }) => {
+			const editor = editorRef.current;
+			if (!editor) {
+				onValueChange(result.value);
 				return;
 			}
-			const requestId = ++mentionSearchRequestIdRef.current;
-			setIsMentionSearchLoading(true);
-			void (async () => {
-				try {
-					const trpcClient = getRuntimeTrpcClient(workspaceId);
-					const payload = await trpcClient.workspace.searchFiles.query({
-						query: activeToken.query,
-						limit: FILE_MENTION_LIMIT,
-					});
-					if (requestId !== mentionSearchRequestIdRef.current) {
-						return;
-					}
-					const files = Array.isArray(payload.files) ? payload.files : [];
-					const insertMap = new Map<string, string>();
-					const items: InlineCompletionItem[] = files.map((file) => {
-						const insertText = buildMentionInsertText(file.path);
-						insertMap.set(file.path, insertText);
-						return { id: file.path, label: file.path };
-					});
-					setMentionItems(items);
-					setMentionInsertTextMap(insertMap);
-				} catch {
-					if (requestId === mentionSearchRequestIdRef.current) {
-						setMentionItems([]);
-						setMentionInsertTextMap(new Map());
-					}
-				} finally {
-					if (requestId === mentionSearchRequestIdRef.current) {
-						setIsMentionSearchLoading(false);
-					}
-				}
-			})();
+			editor.setContent(result.value, result.cursor);
 		},
-		MENTION_QUERY_DEBOUNCE_MS,
-		[activeToken, enabled, workspaceId],
+		[onValueChange],
 	);
 
-	const suggestions = useMemo(() => {
-		return enabled && activeToken ? mentionItems : [];
-	}, [activeToken, enabled, mentionItems]);
+	const completion = useComposerCompletion({
+		value,
+		cursorIndex,
+		workspaceId,
+		enabled,
+		onApplyCompletion: applyCompletion,
+	});
 
-	useEffect(() => {
-		setSelectedSuggestionIndex(0);
-		setIsSuggestionPickerOpen(true);
-	}, [activeToken?.kind, activeToken?.query, activeToken?.start]);
+	const completionItems: InlineCompletionItem[] = completion.suggestions.map((suggestion) => ({
+		id: suggestion.id,
+		label: suggestion.id,
+	}));
 
-	useEffect(() => {
-		if (!autoFocus || disabled || !enabled) {
-			return;
-		}
-		window.requestAnimationFrame(() => {
-			if (!textareaRef.current) {
-				return;
-			}
-			const cursor = textareaRef.current.value.length;
-			textareaRef.current.focus();
-			textareaRef.current.setSelectionRange(cursor, cursor);
-			setCursorIndex(cursor);
-		});
-	}, [autoFocus, disabled, enabled]);
-
-	const applySuggestion = useCallback(
-		(item: InlineCompletionItem) => {
-			if (!activeToken) {
-				return;
-			}
-			const insertText = mentionInsertTextMap.get(item.id) ?? `@${item.id}`;
-			const next = applyClineComposerCompletion(value, activeToken, insertText);
-			onValueChange(next.value);
-			window.requestAnimationFrame(() => {
-				if (!textareaRef.current) {
-					return;
-				}
-				textareaRef.current.focus();
-				textareaRef.current.setSelectionRange(next.cursor, next.cursor);
-				setCursorIndex(next.cursor);
-			});
-		},
-		[activeToken, mentionInsertTextMap, onValueChange, value],
-	);
-
-	const handleTextareaKeyDown = useCallback(
-		(event: KeyboardEvent<HTMLTextAreaElement>) => {
+	const handleEditorKeyDown = useCallback(
+		(event: KeyboardEvent) => {
 			if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
 				event.preventDefault();
-				if (event.shiftKey) {
-					if (onSubmitAndStart) {
-						onSubmitAndStart();
-						return;
-					}
+				if (event.shiftKey && onSubmitAndStart) {
+					onSubmitAndStart();
+					return true;
 				}
 				onSubmit?.();
-				return;
+				return true;
 			}
-
-			const canShowSuggestions = isSuggestionPickerOpen && suggestions.length > 0;
-			if (canShowSuggestions && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-				event.preventDefault();
-				const direction = event.key === "ArrowDown" ? 1 : -1;
-				setSelectedSuggestionIndex((index) => {
-					const nextIndex = index + direction;
-					if (nextIndex < 0) {
-						return suggestions.length - 1;
-					}
-					if (nextIndex >= suggestions.length) {
-						return 0;
-					}
-					return nextIndex;
-				});
-				return;
+			if (completion.handleCompletionKeyDown(event)) {
+				return true;
 			}
-
-			if (canShowSuggestions && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) {
-				event.preventDefault();
-				const selectedItem = suggestions[selectedSuggestionIndex] ?? suggestions[0];
-				if (selectedItem) {
-					applySuggestion(selectedItem);
-				}
-				return;
-			}
-
-			if (event.key === "Escape" && canShowSuggestions) {
-				event.preventDefault();
-				setIsSuggestionPickerOpen(false);
-				return;
-			}
-
 			if (event.key === "Escape") {
 				event.preventDefault();
 				onEscape?.();
+				return true;
 			}
+			return false;
 		},
-		[
-			applySuggestion,
-			isSuggestionPickerOpen,
-			onEscape,
-			onSubmit,
-			onSubmitAndStart,
-			selectedSuggestionIndex,
-			suggestions,
-		],
-	);
-
-	const appendImages = useCallback(
-		(newImages: TaskImage[]) => {
-			if (!onImagesChange || newImages.length === 0) {
-				return;
-			}
-			onImagesChange([...images, ...newImages]);
-		},
-		[images, onImagesChange],
-	);
-
-	const handlePaste = useCallback(
-		(event: ClipboardEvent<HTMLTextAreaElement>) => {
-			if (!onImagesChange || !event.clipboardData) {
-				return;
-			}
-			const imageFiles = collectImageFilesFromDataTransfer(event.clipboardData);
-			if (imageFiles.length === 0) {
-				return;
-			}
-			event.preventDefault();
-			void (async () => {
-				const newImages = await extractImagesFromDataTransfer(event.clipboardData);
-				appendImages(newImages);
-			})();
-		},
-		[appendImages, onImagesChange],
-	);
-
-	const handleDrop = useCallback(
-		(event: DragEvent<HTMLDivElement>) => {
-			setIsDragOver(false);
-			if (!onImagesChange || !event.dataTransfer) {
-				return;
-			}
-			const imageFiles = collectImageFilesFromDataTransfer(event.dataTransfer);
-			if (imageFiles.length === 0) {
-				return;
-			}
-			event.preventDefault();
-			void (async () => {
-				const newImages = await extractImagesFromDataTransfer(event.dataTransfer);
-				appendImages(newImages);
-			})();
-		},
-		[appendImages, onImagesChange],
-	);
-
-	const handleDragOver = useCallback(
-		(event: DragEvent<HTMLDivElement>) => {
-			if (!onImagesChange) {
-				return;
-			}
-			const hasFiles = event.dataTransfer.types.includes("Files");
-			if (!hasFiles) {
-				return;
-			}
-			event.preventDefault();
-			setIsDragOver(true);
-		},
-		[onImagesChange],
-	);
-
-	const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-		// Only clear drag state when leaving the drop zone container,
-		// not when moving between child elements within it.
-		if (event.currentTarget.contains(event.relatedTarget as Node)) {
-			return;
-		}
-		setIsDragOver(false);
-	}, []);
-
-	const handleRemoveImage = useCallback(
-		(imageId: string) => {
-			onImagesChange?.(images.filter((image) => image.id !== imageId));
-		},
-		[images, onImagesChange],
+		[completion, onEscape, onSubmit, onSubmitAndStart],
 	);
 
 	const handleAttachClick = useCallback(() => {
@@ -343,59 +121,55 @@ export function TaskPromptComposer({
 						newImages.push(image);
 					}
 				}
-				appendImages(newImages);
+				attachments.appendImages(newImages);
 				event.currentTarget.value = "";
 			})();
 		},
-		[appendImages, onImagesChange],
+		[attachments, onImagesChange],
 	);
 
-	const showSuggestions = Boolean(enabled && isSuggestionPickerOpen && activeToken);
-
 	return (
-		<div>
-			<div className="relative" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+		<div id={id}>
+			<div
+				className="relative"
+				onDrop={attachments.handleDrop}
+				onDragOver={attachments.handleDragOver}
+				onDragEnter={attachments.handleDragEnter}
+				onDragLeave={attachments.handleDragLeave}
+			>
 				<InlineCompletionPicker
-					open={showSuggestions}
-					items={suggestions}
-					selectedIndex={selectedSuggestionIndex}
-					onSelectItem={applySuggestion}
-					onHoverItem={setSelectedSuggestionIndex}
-					isLoading={isMentionSearchLoading}
-					loadingMessage="Loading files..."
-					emptyMessage="No matching files."
+					open={completion.showPicker}
+					items={completionItems}
+					selectedIndex={completion.selectedIndex}
+					onSelectItem={(item) => completion.selectItem(item.id)}
+					onHoverItem={completion.setSelectedIndex}
+					isLoading={completion.isLoading}
+					loadingMessage={completion.loadingMessage}
+					emptyMessage={completion.emptyMessage}
 				>
-					<textarea
-						id={id}
-						ref={textareaRef}
-						value={value}
-						onChange={(event) => {
-							onValueChange(event.target.value);
-							setCursorIndex(event.target.selectionStart ?? event.target.value.length);
-						}}
-						onKeyDown={handleTextareaKeyDown}
-						onClick={(event) =>
-							setCursorIndex(event.currentTarget.selectionStart ?? event.currentTarget.value.length)
-						}
-						onKeyUp={(event) =>
-							setCursorIndex(event.currentTarget.selectionStart ?? event.currentTarget.value.length)
-						}
-						onPaste={handlePaste}
-						placeholder={placeholder ?? "Describe the task"}
-						disabled={disabled}
+					<div
 						className={cn(
-							"w-full rounded-md border bg-surface-3 p-3 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none",
-							isDragOver ? "border-accent border-dashed" : "border-border-bright",
+							"rounded-md border bg-surface-3 p-3 text-[13px] text-text-primary focus-within:border-border-focus",
+							attachments.isDragOver ? "border-accent border-dashed" : "border-border-bright",
 						)}
-						style={{
-							minHeight: 80,
-							maxHeight: TEXTAREA_MAX_HEIGHT,
-							resize: "none",
-							overflowY: "auto",
-						}}
-					/>
+					>
+						<PromptCodeEditor
+							ref={editorRef}
+							value={value}
+							onChange={onValueChange}
+							onSelectionChange={setCursorIndex}
+							onKeyDown={handleEditorKeyDown}
+							onPaste={(event) => attachments.handlePaste(event.clipboardData)}
+							placeholder={placeholder ?? "Describe the task"}
+							ariaLabel={placeholder ?? "Describe the task"}
+							disabled={isEditorDisabled}
+							autoFocus={autoFocus}
+							minHeight={TEXTAREA_MIN_HEIGHT}
+							maxHeight={TEXTAREA_MAX_HEIGHT}
+						/>
+					</div>
 				</InlineCompletionPicker>
-				{isDragOver ? (
+				{attachments.isDragOver ? (
 					<div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-accent/5">
 						<div className="flex items-center gap-1.5 text-[12px] text-accent font-medium">
 							<ImagePlus size={14} />
@@ -406,7 +180,7 @@ export function TaskPromptComposer({
 			</div>
 
 			{images.length > 0 ? (
-				<TaskImageStrip images={images} onRemoveImage={handleRemoveImage} className="mt-1.5" />
+				<TaskImageStrip images={images} onRemoveImage={attachments.removeImage} className="mt-1.5" />
 			) : null}
 
 			{onImagesChange && showAttachImageButton ? (
@@ -425,7 +199,7 @@ export function TaskPromptComposer({
 							size="sm"
 							icon={<Paperclip size={14} />}
 							onClick={handleAttachClick}
-							disabled={disabled || !enabled}
+							disabled={isEditorDisabled || !enabled}
 						>
 							Attach image
 						</Button>

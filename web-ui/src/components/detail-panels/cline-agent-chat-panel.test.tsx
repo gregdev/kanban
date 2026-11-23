@@ -1,3 +1,4 @@
+import { EditorView } from "@codemirror/view";
 import React, { act, createRef, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +74,30 @@ function createSummary(
 
 function renderPanel(root: Root, panel: ReactElement): void {
 	root.render(<TooltipProvider>{panel}</TooltipProvider>);
+}
+
+/** The composer renders a CodeMirror editor; these helpers drive it like a user would. */
+function getComposerEditor(container: HTMLElement): EditorView {
+	const editor = container.querySelector<HTMLElement>(".cm-editor");
+	if (!editor) {
+		throw new Error("Expected the composer editor");
+	}
+	const view = EditorView.findFromDOM(editor);
+	if (!view) {
+		throw new Error("Expected an attached EditorView");
+	}
+	return view;
+}
+
+function setComposerText(view: EditorView, text: string): void {
+	view.dispatch({
+		changes: { from: 0, to: view.state.doc.length, insert: text },
+		selection: { anchor: text.length },
+	});
+}
+
+function pressComposerKey(view: EditorView, init: KeyboardEventInit): void {
+	view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
 }
 
 describe("ClineAgentChatPanel", () => {
@@ -768,7 +793,7 @@ describe("ClineAgentChatPanel", () => {
 		expect(inlineCode?.className).toContain("break-all");
 	});
 
-	it("autofocuses the composer, grows it, sends on enter, and cancels on escape", async () => {
+	it("autofocuses the composer, sends on enter, and cancels on escape", async () => {
 		const onSendMessage = vi.fn(async () => ({
 			ok: true,
 			chatMessage: {
@@ -794,14 +819,8 @@ describe("ClineAgentChatPanel", () => {
 			await Promise.resolve();
 		});
 
-		const textarea = container.querySelector("textarea");
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		if (!(textarea instanceof HTMLTextAreaElement)) {
-			throw new Error("Expected composer textarea");
-		}
-
-		expect(document.activeElement).toBe(textarea);
-		expect(textarea.getAttribute("rows")).toBe("1");
+		const editor = getComposerEditor(container);
+		expect(document.activeElement).toBe(editor.contentDOM);
 		expect(container.textContent).toContain("Select model");
 		// A running turn gets its own Stop button so sending a queued prompt stays possible.
 		const stopButton = container.querySelector('button[aria-label="Stop agent"]');
@@ -816,47 +835,25 @@ describe("ClineAgentChatPanel", () => {
 			throw new Error("Expected composer queue button");
 		}
 		expect(sendButton.disabled).toBe(true);
-		expect(textarea.getAttribute("placeholder")).toContain("Queue a message");
-
-		Object.defineProperty(textarea, "scrollHeight", {
-			configurable: true,
-			value: 96,
-		});
+		expect(editor.contentDOM.getAttribute("aria-label")).toContain("Queue a message");
 
 		await act(async () => {
-			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-			if (!valueSetter) {
-				throw new Error("Expected textarea value setter");
-			}
-			valueSetter.call(textarea, "Ship it");
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			setComposerText(editor, "Ship it");
 			await Promise.resolve();
 		});
 
-		expect(textarea.style.height).toBe("96px");
+		expect(editor.state.doc.toString()).toBe("Ship it");
 		expect(sendButton.disabled).toBe(false);
 
 		await act(async () => {
-			textarea.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: "Enter",
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
+			pressComposerKey(editor, { key: "Enter", keyCode: 13 });
 			await Promise.resolve();
 		});
 
 		expect(onSendMessage).toHaveBeenCalledWith("task-1", "Ship it", { mode: "act" });
 
 		await act(async () => {
-			textarea.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: "Escape",
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
+			pressComposerKey(editor, { key: "Escape", keyCode: 27 });
 			await Promise.resolve();
 		});
 
@@ -888,11 +885,7 @@ describe("ClineAgentChatPanel", () => {
 			await Promise.resolve();
 		});
 
-		const textarea = container.querySelector("textarea");
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		if (!(textarea instanceof HTMLTextAreaElement)) {
-			throw new Error("Expected composer textarea");
-		}
+		const planner = getComposerEditor(container);
 
 		const planToggle = Array.from(container.querySelectorAll('button[role="tab"]')).find((button) =>
 			button.textContent?.includes("Plan"),
@@ -900,12 +893,7 @@ describe("ClineAgentChatPanel", () => {
 		expect(planToggle?.getAttribute("aria-selected")).toBe("true");
 
 		await act(async () => {
-			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-			if (!valueSetter) {
-				throw new Error("Expected textarea value setter");
-			}
-			valueSetter.call(textarea, "Investigate");
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			setComposerText(planner, "Investigate");
 			await Promise.resolve();
 		});
 
@@ -999,19 +987,10 @@ describe("ClineAgentChatPanel", () => {
 			await Promise.resolve();
 		});
 
-		const textarea = container.querySelector("textarea");
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		if (!(textarea instanceof HTMLTextAreaElement)) {
-			throw new Error("Expected composer textarea");
-		}
+		const editor = getComposerEditor(container);
 
 		await act(async () => {
-			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-			if (!valueSetter) {
-				throw new Error("Expected textarea value setter");
-			}
-			valueSetter.call(textarea, "Keep this");
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			setComposerText(editor, "Keep this");
 			await Promise.resolve();
 		});
 
@@ -1020,7 +999,7 @@ describe("ClineAgentChatPanel", () => {
 			await Promise.resolve();
 		});
 
-		expect(textarea.value).toBe("Keep this\n\nsrc/example.ts:4 | value\n> Add tests");
+		expect(editor.state.doc.toString()).toBe("Keep this\n\nsrc/example.ts:4 | value\n> Add tests");
 	});
 
 	it("sends review comments through the panel handle without overwriting the draft", async () => {
@@ -1049,19 +1028,10 @@ describe("ClineAgentChatPanel", () => {
 			await Promise.resolve();
 		});
 
-		const textarea = container.querySelector("textarea");
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		if (!(textarea instanceof HTMLTextAreaElement)) {
-			throw new Error("Expected composer textarea");
-		}
+		const editor = getComposerEditor(container);
 
 		await act(async () => {
-			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-			if (!valueSetter) {
-				throw new Error("Expected textarea value setter");
-			}
-			valueSetter.call(textarea, "Keep acting");
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			setComposerText(editor, "Keep acting");
 			await Promise.resolve();
 		});
 
@@ -1070,7 +1040,7 @@ describe("ClineAgentChatPanel", () => {
 		});
 
 		expect(onSendMessage).toHaveBeenCalledWith("task-1", "src/example.ts:8 | done\n> Ship this", { mode: "act" });
-		expect(textarea.value).toBe("Keep acting");
+		expect(editor.state.doc.toString()).toBe("Keep acting");
 	});
 
 	it("toggles the composer mode with command shift a", async () => {
@@ -1097,32 +1067,15 @@ describe("ClineAgentChatPanel", () => {
 			await Promise.resolve();
 		});
 
-		const textarea = container.querySelector("textarea");
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		if (!(textarea instanceof HTMLTextAreaElement)) {
-			throw new Error("Expected composer textarea");
-		}
+		const editor = getComposerEditor(container);
 
 		await act(async () => {
-			textarea.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: "A",
-					metaKey: true,
-					shiftKey: true,
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
+			pressComposerKey(editor, { key: "A", keyCode: 65, metaKey: true, shiftKey: true });
 			await Promise.resolve();
 		});
 
 		await act(async () => {
-			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-			if (!valueSetter) {
-				throw new Error("Expected textarea value setter");
-			}
-			valueSetter.call(textarea, "Switch it");
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			setComposerText(editor, "Switch it");
 			await Promise.resolve();
 		});
 
@@ -1167,32 +1120,15 @@ describe("ClineAgentChatPanel", () => {
 
 		expect(container.querySelector('[aria-label="Cline mode"]')).toBeNull();
 
-		const textarea = container.querySelector("textarea");
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		if (!(textarea instanceof HTMLTextAreaElement)) {
-			throw new Error("Expected composer textarea");
-		}
+		const editor = getComposerEditor(container);
 
 		await act(async () => {
-			textarea.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: "A",
-					metaKey: true,
-					shiftKey: true,
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
+			pressComposerKey(editor, { key: "A", keyCode: 65, metaKey: true, shiftKey: true });
 			await Promise.resolve();
 		});
 
 		await act(async () => {
-			const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-			if (!valueSetter) {
-				throw new Error("Expected textarea value setter");
-			}
-			valueSetter.call(textarea, "Keep acting");
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			setComposerText(editor, "Keep acting");
 			await Promise.resolve();
 		});
 

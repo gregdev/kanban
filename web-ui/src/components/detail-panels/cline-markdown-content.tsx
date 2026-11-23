@@ -132,14 +132,17 @@ const markdownComponents: Components = {
 
 		if (highlighted) {
 			return (
-				<pre className="my-0.5 overflow-x-auto rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs leading-5 text-text-primary">
-					<code className={`language-${prismLanguage}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+				<pre className="kb-markdown-code my-0.5 overflow-x-auto rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs leading-5 text-text-primary">
+					<code
+						className={cn("font-mono", `language-${prismLanguage}`)}
+						dangerouslySetInnerHTML={{ __html: highlighted }}
+					/>
 				</pre>
 			);
 		}
 
 		return (
-			<pre className="my-0.5 overflow-x-auto rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs leading-5 text-text-primary">
+			<pre className="kb-markdown-code my-0.5 overflow-x-auto rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs leading-5 text-text-primary">
 				<code className={cn("font-mono", className)}>{code}</code>
 			</pre>
 		);
