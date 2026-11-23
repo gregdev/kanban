@@ -197,6 +197,10 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 	// 50 ms window coalesces 1–4 token deltas into a single flush while
 	// keeping perceived latency below a single frame.
 	const flushTaskChatMessages = (workspaceId: string) => {
+		const timer = taskChatBroadcastTimersByWorkspaceId.get(workspaceId);
+		if (timer) {
+			clearTimeout(timer);
+		}
 		taskChatBroadcastTimersByWorkspaceId.delete(workspaceId);
 		const pending = pendingTaskChatMessagesByWorkspaceId.get(workspaceId);
 		if (!pending || pending.length === 0) {
@@ -238,7 +242,32 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		taskChatBroadcastTimersByWorkspaceId.set(workspaceId, timer);
 	};
 
+	// A clear supersedes any deltas still sitting in the 50 ms batch window for
+	// that task. Without this the buffered deltas flush *after* the cleared
+	// frame, and the web UI reducer (which empties taskChatMessagesByTaskId for
+	// the task on task_chat_cleared, then upserts on task_chat_message) would
+	// resurrect content the user just wiped. Deltas for other tasks stay queued
+	// on the existing timer.
+	const discardPendingTaskChatMessages = (workspaceId: string, taskId: string) => {
+		const pending = pendingTaskChatMessagesByWorkspaceId.get(workspaceId);
+		if (!pending) {
+			return;
+		}
+		const remaining = pending.filter((entry) => entry.taskId !== taskId);
+		if (remaining.length > 0) {
+			pendingTaskChatMessagesByWorkspaceId.set(workspaceId, remaining);
+			return;
+		}
+		const timer = taskChatBroadcastTimersByWorkspaceId.get(workspaceId);
+		if (timer) {
+			clearTimeout(timer);
+		}
+		taskChatBroadcastTimersByWorkspaceId.delete(workspaceId);
+		pendingTaskChatMessagesByWorkspaceId.delete(workspaceId);
+	};
+
 	const broadcastTaskChatCleared = (workspaceId: string, taskId: string) => {
+		discardPendingTaskChatMessages(workspaceId, taskId);
 		const runtimeClients = runtimeStateClientsByWorkspaceId.get(workspaceId);
 		if (!runtimeClients || runtimeClients.size === 0) {
 			return;
