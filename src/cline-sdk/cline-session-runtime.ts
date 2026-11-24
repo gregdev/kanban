@@ -21,6 +21,7 @@ import {
 	resolveClineRestartLaunchRequest,
 } from "./cline-session-launch-config";
 import { buildSessionIdPrefix, createSessionId } from "./cline-session-state";
+import { createClineToolInputDiagnosisHooks } from "./cline-tool-input-diagnosis";
 import { CLINE_MODEL_CATALOG_DEFAULTS } from "./sdk-provider-boundary";
 import {
 	type ClineSdkExtraTool,
@@ -326,9 +327,14 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 				initialMessages,
 				interactive: true,
 				localRuntime: {
-					// Repairs dangling tool calls on every model request, including live
-					// sessions whose in-memory history was interrupted mid-tool.
-					hooks: createClineConversationRepairHooks(),
+					hooks: {
+						// Repairs dangling tool calls on every model request, including live
+						// sessions whose in-memory history was interrupted mid-tool.
+						...createClineConversationRepairHooks(),
+						// Replaces the serialised parse error the model reads for a
+						// malformed tool call with an actionable diagnosis.
+						...createClineToolInputDiagnosisHooks(),
+					},
 					modelCatalogDefaults: CLINE_MODEL_CATALOG_DEFAULTS,
 					...(request.userInstructionService ? { userInstructionService: request.userInstructionService } : {}),
 					logger: createKanbanClineLogger({

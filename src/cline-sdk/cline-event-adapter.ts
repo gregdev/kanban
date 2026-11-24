@@ -23,6 +23,7 @@ import {
 	startToolCallMessage,
 	updateSummary,
 } from "./cline-session-state";
+import { summarizeClineRecoverableError } from "./cline-retry-notice";
 import { formatClineToolCallLabel, getClineToolCallDisplay } from "./cline-tool-call-display";
 import type { ClineSdkAgentEvent, ClineSdkSessionEvent } from "./sdk-runtime-boundary";
 
@@ -288,8 +289,12 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 		if (!recoverable) {
 			clearActiveTurnState(entry);
 		}
-		if (recoverable && errorMessage) {
-			const retryMsg = createMessage(taskId, "system", `Retrying: ${errorMessage}`);
+		// The SDK's recoverable errors carry internal diagnostics (for example a
+		// serialised tool-failure payload), so summarize them for display instead
+		// of dumping the raw string into the transcript.
+		const retrySummary = errorMessage ? summarizeClineRecoverableError(errorMessage) : null;
+		if (recoverable && retrySummary) {
+			const retryMsg = createMessage(taskId, "system", `Retrying: ${retrySummary}`);
 			entry.messages.push(retryMsg);
 			input.emitMessage(taskId, retryMsg);
 		}
@@ -305,7 +310,7 @@ export function applyClineSessionEvent(input: ApplyClineSessionEventInput): void
 			lastHookAt: now(),
 			latestHookActivity: {
 				activityText: recoverable
-					? `Retrying after error: ${errorMessage ?? "Unknown agent error"}`
+					? `Retrying after error: ${retrySummary ?? "Unknown agent error"}`
 					: `Agent error: ${errorMessage ?? "Unknown agent error"}`,
 				toolName: retainedToolActivity.toolName,
 				toolInputSummary: retainedToolActivity.toolInputSummary,

@@ -564,6 +564,40 @@ describe("applyClineSessionEvent", () => {
 		expect(result.messages[0]?.content).toContain("Missing API key");
 	});
 
+	it("summarizes malformed tool-argument diagnostics from the SDK mistake tracker", () => {
+		const entry = createEntry("task-1");
+		entry.summary.state = "running";
+
+		// Verbatim recoverable error from task 05762 (deepseek-flash emitted invalid
+		// JSON escapes for a search_codebase query).
+		const result = applyEvent({
+			entry,
+			event: {
+				type: "agent_event",
+				payload: {
+					sessionId: "session-1",
+					event: {
+						type: "error",
+						error: new Error(
+							`1 tool call(s) failed: [search_codebase] {"error":"Tool call search_codebase emitted invalid JSON arguments: Tool call arguments could not be parsed as JSON. Ensure the outer tool payload is valid JSON and escape embedded quotes/newlines inside string fields."}`,
+						),
+						recoverable: true,
+						iteration: 1,
+					},
+				},
+			},
+		});
+
+		expect(result.entry.summary.state).toBe("running");
+		expect(result.messages).toHaveLength(1);
+		expect(result.messages[0]?.role).toBe("system");
+		expect(result.messages[0]?.content).toBe("Retrying: malformed tool arguments for search_codebase");
+		expect(result.messages[0]?.content).not.toContain('{"error"');
+		expect(result.entry.summary.latestHookActivity?.activityText).toBe(
+			"Retrying after error: malformed tool arguments for search_codebase",
+		);
+	});
+
 	it("sets credit_limit notificationType and suppresses warningMessage for insufficient-balance errors from SDK", () => {
 		const entry = createEntry("task-1");
 		entry.summary.state = "running";

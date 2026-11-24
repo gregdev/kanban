@@ -29,6 +29,7 @@ import { getCliTelemetryService } from "./cline-telemetry-service";
 
 export { TelemetryLoggerSink, TelemetryService } from "@clinebot/core";
 export type {
+	AgentAfterToolResult,
 	AgentHooks,
 	AgentMessage,
 	AgentMessagePart,
