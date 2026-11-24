@@ -141,7 +141,10 @@ describe("workspace.saveState linked-task auto-start", () => {
 			expect(startTaskSession).toHaveBeenCalledTimes(1);
 			expect(startTaskSession).toHaveBeenCalledWith(
 				expect.objectContaining({ workspaceId }),
-				expect.objectContaining({ taskId: DEPENDENT_ID, prompt: `Task ${DEPENDENT_ID}` }),
+				expect.objectContaining({
+					taskId: DEPENDENT_ID,
+					prompt: expect.stringContaining(`Task ${DEPENDENT_ID}`),
+				}),
 			);
 			expect(broadcastRuntimeWorkspaceStateUpdated).toHaveBeenCalled();
 

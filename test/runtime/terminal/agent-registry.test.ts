@@ -32,6 +32,7 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		agentEnv: {},
 		agentPathPrepend: [],
 		autoResumeInterruptedTasks: false,
+		dependencyHandoffContextEnabled: true,
 		...overrides,
 	};
 }

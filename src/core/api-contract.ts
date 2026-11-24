@@ -970,6 +970,8 @@ export const runtimeConfigResponseSchema = z.object({
 	readyForReviewNotificationsEnabled: z.boolean(),
 	/** Opt-in: resume tasks that were running when the previous runtime died. */
 	autoResumeInterruptedTasks: z.boolean().optional(),
+	/** Whether auto-started linked dependents get the harness handoff note. */
+	dependencyHandoffContextEnabled: z.boolean().optional(),
 	detectedCommands: z.array(z.string()),
 	agents: z.array(runtimeAgentDefinitionSchema),
 	shortcuts: z.array(runtimeProjectShortcutSchema),
@@ -994,6 +996,7 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
 	autoResumeInterruptedTasks: z.boolean().optional(),
+	dependencyHandoffContextEnabled: z.boolean().optional(),
 	commitPromptTemplate: z.string().optional(),
 	openPrPromptTemplate: z.string().optional(),
 });

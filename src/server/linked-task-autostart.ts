@@ -28,6 +28,8 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
+import { loadGlobalRuntimeConfig } from "../config/runtime-config";
+import { buildDependencyHandoffNote, prependDependencyHandoffNote } from "../core/dependency-handoff";
 import {
 	getReadyLinkedTaskIdsForTaskInTrash,
 	getTaskColumnId,
@@ -36,6 +38,7 @@ import {
 } from "../core/task-board-mutations";
 import { mutateWorkspaceState, type RuntimeWorkspaceAtomicMutationResponse } from "../state/workspace-state";
 import type { RuntimeTrpcWorkspaceScope } from "../trpc/app-router";
+import { resolveDependencyHandoffCommit } from "../workspace/dependency-handoff-commit";
 
 export type ReadyDependentTaskSkipReason = "not_backlog" | "session_running" | "already_starting" | "missing_card";
 
@@ -64,6 +67,12 @@ export interface PlannedReadyDependentTaskStarts {
 	trashedTaskIds: string[];
 	/** Dependent tasks that are safe to start now. */
 	readyTaskIds: string[];
+	/**
+	 * For every ready dependent, the trashed prerequisite that unblocked it. When
+	 * several prerequisites finish in the same save the first one is kept, which
+	 * keeps the handoff note to a single factual pointer.
+	 */
+	prerequisiteTaskIdByReadyTaskId: Record<string, string>;
 	/** Dependent tasks that were unblocked but deliberately not started. */
 	skipped: SkippedReadyDependentTask[];
 }
@@ -99,6 +108,12 @@ export interface StartReadyDependentTasksDependencies {
 	) => Promise<RuntimeTaskSessionStartResponse>;
 	/** Optional live check; the persisted session snapshot is checked regardless. */
 	isTaskSessionRunning?: (workspaceScope: RuntimeTrpcWorkspaceScope, taskId: string) => boolean | Promise<boolean>;
+	/**
+	 * Reads the global `dependencyHandoffContextEnabled` gate. Defaults to the
+	 * persisted runtime config so both the CLI and the runtime server behave
+	 * identically without either caller wiring the setting through.
+	 */
+	isDependencyHandoffContextEnabled?: () => boolean | Promise<boolean>;
 	warn?: (message: string) => void;
 }
 
@@ -146,11 +161,20 @@ export function findTasksMovedFromReviewToTrash(
 	return trashedTaskIds;
 }
 
-function findReadyDependentTaskIds(previousBoard: RuntimeBoardData, trashedTaskIds: string[]): string[] {
+interface ReadyDependentCandidate {
+	taskId: string;
+	/** The trashed prerequisite that unblocked this dependent. */
+	prerequisiteTaskId: string;
+}
+
+function findReadyDependentCandidates(
+	previousBoard: RuntimeBoardData,
+	trashedTaskIds: string[],
+): ReadyDependentCandidate[] {
 	if (trashedTaskIds.length === 0 || previousBoard.dependencies.length === 0) {
 		return [];
 	}
-	const readyTaskIds: string[] = [];
+	const candidates: ReadyDependentCandidate[] = [];
 	const seen = new Set<string>();
 	for (const trashedTaskId of trashedTaskIds) {
 		// The previous board is the one where the task still sits in review, so the
@@ -163,10 +187,10 @@ function findReadyDependentTaskIds(previousBoard: RuntimeBoardData, trashedTaskI
 				continue;
 			}
 			seen.add(taskId);
-			readyTaskIds.push(taskId);
+			candidates.push({ taskId, prerequisiteTaskId: trashedTaskId });
 		}
 	}
-	return readyTaskIds;
+	return candidates;
 }
 
 /**
@@ -178,12 +202,13 @@ export function planReadyDependentTaskStarts(
 	input: PlanReadyDependentTaskStartsInput,
 ): PlannedReadyDependentTaskStarts {
 	const trashedTaskIds = findTasksMovedFromReviewToTrash(input.previousBoard, input.nextBoard);
-	const candidateTaskIds = findReadyDependentTaskIds(input.previousBoard, trashedTaskIds);
+	const candidates = findReadyDependentCandidates(input.previousBoard, trashedTaskIds);
 	const inFlightTaskIds = input.inFlightTaskIds ?? new Set<string>();
 	const readyTaskIds: string[] = [];
+	const prerequisiteTaskIdByReadyTaskId: Record<string, string> = {};
 	const skipped: SkippedReadyDependentTask[] = [];
 
-	for (const taskId of candidateTaskIds) {
+	for (const { taskId, prerequisiteTaskId } of candidates) {
 		const columnId = getTaskColumnId(input.nextBoard, taskId);
 		if (columnId !== "backlog") {
 			skipped.push({
@@ -210,11 +235,13 @@ export function planReadyDependentTaskStarts(
 			continue;
 		}
 		readyTaskIds.push(taskId);
+		prerequisiteTaskIdByReadyTaskId[taskId] = prerequisiteTaskId;
 	}
 
 	return {
 		trashedTaskIds,
 		readyTaskIds,
+		prerequisiteTaskIdByReadyTaskId,
 		skipped,
 	};
 }
@@ -266,16 +293,61 @@ async function moveTaskToInProgress(
 	});
 }
 
-function createTaskSessionStartRequest(card: RuntimeBoardCard): RuntimeTaskSessionStartRequest {
+function createTaskSessionStartRequest(card: RuntimeBoardCard, handoffNote: string): RuntimeTaskSessionStartRequest {
 	return {
 		taskId: card.id,
-		prompt: card.prompt,
+		// Only the kickoff request carries the note; the stored card prompt is
+		// never rewritten (the board still owns the user's original text).
+		prompt: prependDependencyHandoffNote(handoffNote, card.prompt),
 		taskTitle: card.title,
 		startInPlanMode: card.startInPlanMode,
 		baseRef: card.baseRef,
 		agentId: card.agentId,
 		clineSettings: card.clineSettings,
 	};
+}
+
+const DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED = true;
+
+async function isDependencyHandoffContextEnabled(deps: StartReadyDependentTasksDependencies): Promise<boolean> {
+	try {
+		if (deps.isDependencyHandoffContextEnabled) {
+			return await deps.isDependencyHandoffContextEnabled();
+		}
+		const runtimeConfig = await loadGlobalRuntimeConfig();
+		return runtimeConfig.dependencyHandoffContextEnabled;
+	} catch {
+		// A config read failure must never block an auto-start; keep the default.
+		return DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED;
+	}
+}
+
+interface DependencyHandoffNoteContext {
+	workspaceScope: RuntimeTrpcWorkspaceScope;
+	nextBoard: RuntimeBoardData;
+	dependentCard: RuntimeBoardCard;
+	prerequisiteTaskId: string;
+}
+
+async function buildDependencyHandoffNoteForStart(context: DependencyHandoffNoteContext): Promise<string> {
+	const prerequisiteCard = findTaskCard(context.nextBoard, context.prerequisiteTaskId);
+	// The dependent worktree is created from its own base ref; fall back to the
+	// prerequisite's ref only when the dependent card has none.
+	const baseRef = context.dependentCard.baseRef.trim() || prerequisiteCard?.baseRef.trim() || "";
+	if (!baseRef) {
+		return "";
+	}
+	const commitSha = await resolveDependencyHandoffCommit({
+		workspacePath: context.workspaceScope.workspacePath,
+		prerequisiteTaskId: context.prerequisiteTaskId,
+		baseRef,
+	});
+	return buildDependencyHandoffNote({
+		prerequisiteTaskId: context.prerequisiteTaskId,
+		prerequisiteTitle: prerequisiteCard?.title,
+		baseRef,
+		commitSha,
+	});
 }
 
 export async function startReadyDependentTasks(
@@ -298,6 +370,7 @@ export async function startReadyDependentTasks(
 	if (planned.readyTaskIds.length === 0) {
 		return result;
 	}
+	const handoffContextEnabled = await isDependencyHandoffContextEnabled(deps);
 
 	for (const taskId of planned.readyTaskIds) {
 		const inFlightKey = createInFlightTaskKey(workspaceScope.workspaceId, taskId);
@@ -331,7 +404,17 @@ export async function startReadyDependentTasks(
 
 		inFlightTaskStartKeys.add(inFlightKey);
 		try {
-			const response = await deps.startTaskSession(workspaceScope, createTaskSessionStartRequest(card));
+			const prerequisiteTaskId = planned.prerequisiteTaskIdByReadyTaskId[taskId] ?? "";
+			const handoffNote =
+				handoffContextEnabled && prerequisiteTaskId
+					? await buildDependencyHandoffNoteForStart({
+							workspaceScope,
+							nextBoard: input.nextBoard,
+							dependentCard: card,
+							prerequisiteTaskId,
+						})
+					: "";
+			const response = await deps.startTaskSession(workspaceScope, createTaskSessionStartRequest(card, handoffNote));
 			if (!response.ok || !response.summary) {
 				const error = response.error ?? "Could not start task session.";
 				deps.warn?.(`Could not auto-start linked task "${taskId}". ${error}`);

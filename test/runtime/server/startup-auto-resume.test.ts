@@ -97,6 +97,7 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigState> = {}): Runti
 		agentEnv: {},
 		agentPathPrepend: [],
 		autoResumeInterruptedTasks: true,
+		dependencyHandoffContextEnabled: true,
 		...overrides,
 	};
 }

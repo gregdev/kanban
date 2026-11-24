@@ -8,6 +8,7 @@ import type {
 	RuntimeBoardCard,
 	RuntimeBoardData,
 	RuntimeBoardDependency,
+	RuntimeTaskSessionStartRequest,
 	RuntimeTaskSessionSummary,
 } from "../../../src/core/api-contract";
 import {
@@ -236,6 +237,77 @@ async function withWorkspace(run: (fixture: WorkspaceFixture) => Promise<void>):
 }
 
 describe("startReadyDependentTasks", () => {
+	it("prepends the harness handoff note to the kickoff prompt", async () => {
+		await withWorkspace(async ({ workspaceId, workspacePath }) => {
+			const startTaskSession = vi.fn(async (_scope, request: RuntimeTaskSessionStartRequest) => ({
+				ok: true as const,
+				summary: createRunningSummary(request.taskId),
+			}));
+			await startReadyDependentTasks(
+				{ startTaskSession },
+				{
+					workspaceScope: { workspaceId, workspacePath },
+					previousBoard: createBoard({ review: [PREREQUISITE_ID], backlog: [DEPENDENT_ID] }, [
+						createDependency(DEPENDENT_ID, PREREQUISITE_ID),
+					]),
+					nextBoard: createBoard({ trash: [PREREQUISITE_ID], backlog: [DEPENDENT_ID] }, [
+						createDependency(DEPENDENT_ID, PREREQUISITE_ID),
+					]),
+				},
+			);
+
+			const request = startTaskSession.mock.calls[0]?.[1];
+			if (!request) {
+				throw new Error("Expected the dependent to be started.");
+			}
+			expect(request.prompt).toBe(
+				[
+					"Kanban handoff context (harness note, not from the user):",
+					`- This task is linked after ${PREREQUISITE_ID} "Task ${PREREQUISITE_ID}", which completed and was moved to done.`,
+					"- No commit for the prerequisite was found on main; its changes may not be present in this worktree.",
+					"",
+					`Task ${DEPENDENT_ID}`,
+				].join("\n"),
+			);
+
+			// The stored card prompt is never rewritten.
+			const state = await loadWorkspaceState(workspacePath);
+			const dependentCard = state.board.columns
+				.flatMap((column) => column.cards)
+				.find((card) => card.id === DEPENDENT_ID);
+			expect(dependentCard?.prompt).toBe(`Task ${DEPENDENT_ID}`);
+		});
+	});
+
+	it("skips the note when the handoff context setting is disabled", async () => {
+		await withWorkspace(async ({ workspaceId, workspacePath }) => {
+			const startTaskSession = vi.fn(async (_scope, request: { taskId: string }) => ({
+				ok: true as const,
+				summary: createRunningSummary(request.taskId),
+			}));
+			await startReadyDependentTasks(
+				{
+					startTaskSession,
+					isDependencyHandoffContextEnabled: () => false,
+				},
+				{
+					workspaceScope: { workspaceId, workspacePath },
+					previousBoard: createBoard({ review: [PREREQUISITE_ID], backlog: [DEPENDENT_ID] }, [
+						createDependency(DEPENDENT_ID, PREREQUISITE_ID),
+					]),
+					nextBoard: createBoard({ trash: [PREREQUISITE_ID], backlog: [DEPENDENT_ID] }, [
+						createDependency(DEPENDENT_ID, PREREQUISITE_ID),
+					]),
+				},
+			);
+
+			expect(startTaskSession).toHaveBeenCalledWith(
+				expect.objectContaining({ workspaceId }),
+				expect.objectContaining({ taskId: DEPENDENT_ID, prompt: `Task ${DEPENDENT_ID}` }),
+			);
+		});
+	});
+
 	it("starts the dependent once and moves it to in_progress", async () => {
 		await withWorkspace(async ({ workspaceId, workspacePath }) => {
 			const startTaskSession = vi.fn(async (_scope, request: { taskId: string }) => ({
@@ -263,7 +335,10 @@ describe("startReadyDependentTasks", () => {
 			expect(startTaskSession).toHaveBeenCalledTimes(1);
 			expect(startTaskSession).toHaveBeenCalledWith(
 				expect.objectContaining({ workspaceId }),
-				expect.objectContaining({ taskId: DEPENDENT_ID, prompt: `Task ${DEPENDENT_ID}` }),
+				expect.objectContaining({
+					taskId: DEPENDENT_ID,
+					prompt: expect.stringContaining(`Task ${DEPENDENT_ID}`),
+				}),
 			);
 
 			const state = await loadWorkspaceState(workspacePath);
@@ -295,9 +370,15 @@ describe("startReadyDependentTasks", () => {
 					createDependency(DEPENDENT_ID, PREREQUISITE_ID),
 				]),
 			};
+			// The handoff note is covered separately; disable it here so this test
+			// only exercises the in-flight guard and stays off the config file.
+			const deps = {
+				startTaskSession,
+				isDependencyHandoffContextEnabled: () => false,
+			};
 
-			const first = startReadyDependentTasks({ startTaskSession }, input);
-			const second = await startReadyDependentTasks({ startTaskSession }, input);
+			const first = startReadyDependentTasks(deps, input);
+			const second = await startReadyDependentTasks(deps, input);
 
 			expect(startTaskSession).toHaveBeenCalledTimes(1);
 			expect(second.started).toEqual([]);

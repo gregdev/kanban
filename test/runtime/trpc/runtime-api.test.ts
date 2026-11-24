@@ -191,6 +191,7 @@ function createRuntimeConfigState(): RuntimeConfigState {
 		agentEnv: {},
 		agentPathPrepend: [],
 		autoResumeInterruptedTasks: false,
+		dependencyHandoffContextEnabled: true,
 		globalConfigPath: "/tmp/global-config.json",
 		projectConfigPath: "/tmp/project-config.json",
 	};

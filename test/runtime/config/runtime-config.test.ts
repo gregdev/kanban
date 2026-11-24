@@ -789,4 +789,82 @@ describe("runtime-config auto agent selection", { concurrent: false }, () => {
 			cleanupHome();
 		}
 	});
+
+	it("defaults dependencyHandoffContextEnabled to on and omits the default key", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-handoff-default-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-handoff-default-",
+		);
+
+		try {
+			const runtimeConfigDir = join(tempHome, ".cline", "kanban");
+			mkdirSync(runtimeConfigDir, { recursive: true });
+			writeFileSync(join(runtimeConfigDir, "config.json"), "{}", "utf8");
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const current = await loadRuntimeConfig(tempProject);
+				expect(current.dependencyHandoffContextEnabled).toBe(true);
+
+				await saveRuntimeConfig(tempProject, {
+					selectedAgentId: "cline",
+					selectedShortcutLabel: null,
+					agentAutonomousModeEnabled: true,
+					readyForReviewNotificationsEnabled: true,
+					shortcuts: [],
+					commitPromptTemplate: current.commitPromptTemplateDefault,
+					openPrPromptTemplate: current.openPrPromptTemplateDefault,
+					autoResumeInterruptedTasks: false,
+				});
+
+				const persisted = JSON.parse(readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8")) as {
+					dependencyHandoffContextEnabled?: boolean;
+				};
+				expect(persisted.dependencyHandoffContextEnabled).toBeUndefined();
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("persists a disabled dependencyHandoffContextEnabled with write-back semantics", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-handoff-off-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-handoff-off-",
+		);
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				await loadRuntimeConfig(tempProject);
+				const disabled = await updateRuntimeConfig(tempProject, {
+					dependencyHandoffContextEnabled: false,
+				});
+				expect(disabled.dependencyHandoffContextEnabled).toBe(false);
+
+				const persisted = JSON.parse(readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8")) as {
+					dependencyHandoffContextEnabled?: boolean;
+				};
+				expect(persisted.dependencyHandoffContextEnabled).toBe(false);
+
+				const reloaded = await loadRuntimeConfig(tempProject);
+				expect(reloaded.dependencyHandoffContextEnabled).toBe(false);
+
+				// Re-enabling writes the explicit `true` back because the key is now
+				// present on disk (same write-back rule as the other booleans).
+				const enabled = await updateRuntimeConfig(tempProject, {
+					dependencyHandoffContextEnabled: true,
+				});
+				expect(enabled.dependencyHandoffContextEnabled).toBe(true);
+				const persistedAfterEnable = JSON.parse(
+					readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8"),
+				) as {
+					dependencyHandoffContextEnabled?: boolean;
+				};
+				expect(persistedAfterEnable.dependencyHandoffContextEnabled).toBe(true);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
 });

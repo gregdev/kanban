@@ -118,6 +118,7 @@ export function buildRuntimeConfigResponse(
 		projectConfigPath: runtimeConfig.projectConfigPath,
 		readyForReviewNotificationsEnabled: runtimeConfig.readyForReviewNotificationsEnabled,
 		autoResumeInterruptedTasks: runtimeConfig.autoResumeInterruptedTasks,
+		dependencyHandoffContextEnabled: runtimeConfig.dependencyHandoffContextEnabled,
 		detectedCommands,
 		agents,
 		shortcuts: runtimeConfig.shortcuts,

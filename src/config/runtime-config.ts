@@ -42,6 +42,12 @@ interface RuntimeGlobalConfigFileShape {
 	 * opt-in and is bounded per startup.
 	 */
 	autoResumeInterruptedTasks?: boolean;
+	/**
+	 * When true, an auto-started linked dependent gets a short harness note that
+	 * points at the prerequisite task and its commit. Defaults to on; the note is
+	 * only sent for this kickoff and never written back to the board card.
+	 */
+	dependencyHandoffContextEnabled?: boolean;
 }
 
 interface RuntimeProjectConfigFileShape {
@@ -65,6 +71,8 @@ export interface RuntimeConfigState {
 	agentEnv: Record<string, string>;
 	agentPathPrepend: string[];
 	autoResumeInterruptedTasks: boolean;
+	/** Gates the harness handoff note for auto-started linked dependents. */
+	dependencyHandoffContextEnabled: boolean;
 }
 
 export interface RuntimeConfigUpdateInput {
@@ -79,6 +87,7 @@ export interface RuntimeConfigUpdateInput {
 	agentEnv?: Record<string, string>;
 	agentPathPrepend?: string[];
 	autoResumeInterruptedTasks?: boolean;
+	dependencyHandoffContextEnabled?: boolean;
 }
 
 const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
@@ -86,6 +95,7 @@ const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "codex"
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
 const DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS = false;
+const DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED = true;
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
 
 - Do not run destructive commands: git reset --hard, git clean -fdx, git worktree remove, rm/mv on repository paths.
@@ -323,6 +333,10 @@ function toRuntimeConfigState({
 			globalConfig?.autoResumeInterruptedTasks,
 			DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS,
 		),
+		dependencyHandoffContextEnabled: normalizeBoolean(
+			globalConfig?.dependencyHandoffContextEnabled,
+			DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED,
+		),
 	};
 }
 
@@ -348,6 +362,7 @@ async function writeRuntimeGlobalConfigFile(
 		agentEnv?: Record<string, string>;
 		agentPathPrepend?: string[];
 		autoResumeInterruptedTasks?: boolean;
+		dependencyHandoffContextEnabled?: boolean;
 	},
 ): Promise<void> {
 	const existing = await readRuntimeConfigFile<RuntimeGlobalConfigFileShape>(configPath);
@@ -379,6 +394,10 @@ async function writeRuntimeGlobalConfigFile(
 		config.autoResumeInterruptedTasks === undefined
 			? normalizeBoolean(existing?.autoResumeInterruptedTasks, DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS)
 			: normalizeBoolean(config.autoResumeInterruptedTasks, DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS);
+	const dependencyHandoffContextEnabled =
+		config.dependencyHandoffContextEnabled === undefined
+			? normalizeBoolean(existing?.dependencyHandoffContextEnabled, DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED)
+			: normalizeBoolean(config.dependencyHandoffContextEnabled, DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED);
 	const commitPromptTemplate =
 		config.commitPromptTemplate === undefined
 			? DEFAULT_COMMIT_PROMPT_TEMPLATE
@@ -424,6 +443,12 @@ async function writeRuntimeGlobalConfigFile(
 		autoResumeInterruptedTasks !== DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS
 	) {
 		payload.autoResumeInterruptedTasks = autoResumeInterruptedTasks;
+	}
+	if (
+		hasOwnKey(existing, "dependencyHandoffContextEnabled") ||
+		dependencyHandoffContextEnabled !== DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED
+	) {
+		payload.dependencyHandoffContextEnabled = dependencyHandoffContextEnabled;
 	}
 	if (hasOwnKey(existing, "commitPromptTemplate") || commitPromptTemplate !== DEFAULT_COMMIT_PROMPT_TEMPLATE) {
 		payload.commitPromptTemplate = commitPromptTemplate;
@@ -536,6 +561,7 @@ function createRuntimeConfigStateFromValues(input: {
 	agentEnv?: Record<string, string>;
 	agentPathPrepend?: string[];
 	autoResumeInterruptedTasks?: boolean;
+	dependencyHandoffContextEnabled?: boolean;
 }): RuntimeConfigState {
 	return {
 		globalConfigPath: input.globalConfigPath,
@@ -562,6 +588,10 @@ function createRuntimeConfigStateFromValues(input: {
 			input.autoResumeInterruptedTasks,
 			DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS,
 		),
+		dependencyHandoffContextEnabled: normalizeBoolean(
+			input.dependencyHandoffContextEnabled,
+			DEFAULT_DEPENDENCY_HANDOFF_CONTEXT_ENABLED,
+		),
 	};
 }
 
@@ -580,6 +610,7 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		agentEnv: current.agentEnv,
 		agentPathPrepend: current.agentPathPrepend,
 		autoResumeInterruptedTasks: current.autoResumeInterruptedTasks,
+		dependencyHandoffContextEnabled: current.dependencyHandoffContextEnabled,
 	});
 }
 
@@ -619,6 +650,7 @@ export async function saveRuntimeConfig(
 		agentEnv?: Record<string, string>;
 		agentPathPrepend?: string[];
 		autoResumeInterruptedTasks: boolean;
+		dependencyHandoffContextEnabled?: boolean;
 	},
 ): Promise<RuntimeConfigState> {
 	const { globalConfigPath, projectConfigPath } = resolveRuntimeConfigPaths(cwd);
@@ -634,6 +666,7 @@ export async function saveRuntimeConfig(
 			agentEnv: config.agentEnv,
 			agentPathPrepend: config.agentPathPrepend,
 			autoResumeInterruptedTasks: config.autoResumeInterruptedTasks,
+			dependencyHandoffContextEnabled: config.dependencyHandoffContextEnabled,
 		});
 		await writeRuntimeProjectConfigFile(projectConfigPath, { shortcuts: config.shortcuts });
 		return createRuntimeConfigStateFromValues({
@@ -650,6 +683,7 @@ export async function saveRuntimeConfig(
 			agentEnv: config.agentEnv,
 			agentPathPrepend: config.agentPathPrepend,
 			autoResumeInterruptedTasks: config.autoResumeInterruptedTasks,
+			dependencyHandoffContextEnabled: config.dependencyHandoffContextEnabled,
 		});
 	});
 }
@@ -681,6 +715,8 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 					? current.agentPathPrepend
 					: normalizeAgentPathPrepend(updates.agentPathPrepend),
 			autoResumeInterruptedTasks: updates.autoResumeInterruptedTasks ?? current.autoResumeInterruptedTasks,
+			dependencyHandoffContextEnabled:
+				updates.dependencyHandoffContextEnabled ?? current.dependencyHandoffContextEnabled,
 		};
 
 		const hasChanges =
@@ -694,6 +730,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			!areAgentEnvValuesEqual(nextConfig.agentEnv, current.agentEnv) ||
 			!areAgentPathPrependValuesEqual(nextConfig.agentPathPrepend, current.agentPathPrepend) ||
 			nextConfig.autoResumeInterruptedTasks !== current.autoResumeInterruptedTasks ||
+			nextConfig.dependencyHandoffContextEnabled !== current.dependencyHandoffContextEnabled ||
 			!areRuntimeProjectShortcutsEqual(nextConfig.shortcuts, current.shortcuts);
 
 		if (!hasChanges) {
@@ -711,6 +748,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			agentEnv: nextConfig.agentEnv,
 			agentPathPrepend: nextConfig.agentPathPrepend,
 			autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
+			dependencyHandoffContextEnabled: nextConfig.dependencyHandoffContextEnabled,
 		});
 		await writeRuntimeProjectConfigFile(projectConfigPath, {
 			shortcuts: nextConfig.shortcuts,
@@ -729,6 +767,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			agentEnv: nextConfig.agentEnv,
 			agentPathPrepend: nextConfig.agentPathPrepend,
 			autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
+			dependencyHandoffContextEnabled: nextConfig.dependencyHandoffContextEnabled,
 		});
 	});
 }
@@ -768,6 +807,8 @@ export async function updateGlobalRuntimeConfig(
 						? current.agentPathPrepend
 						: normalizeAgentPathPrepend(updates.agentPathPrepend),
 				autoResumeInterruptedTasks: updates.autoResumeInterruptedTasks ?? current.autoResumeInterruptedTasks,
+				dependencyHandoffContextEnabled:
+					updates.dependencyHandoffContextEnabled ?? current.dependencyHandoffContextEnabled,
 			};
 
 			const hasChanges =
@@ -780,7 +821,8 @@ export async function updateGlobalRuntimeConfig(
 				nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate ||
 				!areAgentEnvValuesEqual(nextConfig.agentEnv, current.agentEnv) ||
 				!areAgentPathPrependValuesEqual(nextConfig.agentPathPrepend, current.agentPathPrepend) ||
-				nextConfig.autoResumeInterruptedTasks !== current.autoResumeInterruptedTasks;
+				nextConfig.autoResumeInterruptedTasks !== current.autoResumeInterruptedTasks ||
+				nextConfig.dependencyHandoffContextEnabled !== current.dependencyHandoffContextEnabled;
 
 			if (!hasChanges) {
 				return current;
@@ -797,6 +839,7 @@ export async function updateGlobalRuntimeConfig(
 				agentEnv: nextConfig.agentEnv,
 				agentPathPrepend: nextConfig.agentPathPrepend,
 				autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
+				dependencyHandoffContextEnabled: nextConfig.dependencyHandoffContextEnabled,
 			});
 
 			return createRuntimeConfigStateFromValues({
@@ -813,6 +856,7 @@ export async function updateGlobalRuntimeConfig(
 				agentEnv: nextConfig.agentEnv,
 				agentPathPrepend: nextConfig.agentPathPrepend,
 				autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
+				dependencyHandoffContextEnabled: nextConfig.dependencyHandoffContextEnabled,
 			});
 		},
 	);
