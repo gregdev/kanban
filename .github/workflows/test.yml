@@ -60,6 +60,12 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # Guards against worktree-relative link text that pnpm writes into this
+      # checkout's node_modules when it is run inside a task worktree: those
+      # links die with the worktree and break the next build.
+      - name: node_modules symlinks
+        run: pnpm run check:links
+
       - name: Root unit tests
         run: pnpm run test:fast
 
