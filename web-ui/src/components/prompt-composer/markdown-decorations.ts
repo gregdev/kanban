@@ -18,9 +18,15 @@ import { findInlineCodeSpans } from "@/components/prompt-composer/inline-code-an
  * a label in the top cap. Inline code is marked (`cm-inline-code`) with its
  * backticks hidden.
  *
- * Markdown syntax is revealed for whatever the selection touches, so the user can
- * still reach the delimiters to edit them. That is also why this rebuilds on
- * `selectionSet` and not just `docChanged`.
+ * An opening delimiter stays collapsed even while the caret sits on its row: the
+ * auto-pair leaves the caret right after the ``` so the info string can be typed,
+ * and revealing the row there would put the backticks straight back on screen.
+ * Selecting part of the delimiter (`isDelimiterRevealed`) reveals it for editing.
+ * A collapsed opener doubles as the panel's header strip (CSS keeps that cap at a
+ * readable line height), so the info string and the caret always have somewhere to
+ * live. Everything else is revealed for whatever the selection touches, so the
+ * user can still reach the syntax. That is also why this rebuilds on `selectionSet`
+ * and not just `docChanged`.
  *
  * Note: the collapsed rows are CSS-thin normal lines, not block replacements.
  * CodeMirror forbids plugins from providing block decorations ("Block decorations
@@ -49,6 +55,22 @@ function lineDecoration(classes: string): Decoration {
 /** True when any selection range touches `[from, to]`, i.e. the syntax is being edited. */
 function isRevealed(state: EditorState, from: number, to: number): boolean {
 	return state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+}
+
+/**
+ * True when the syntax in `[from, to]` is being edited, for delimiters that should
+ * stay hidden while the caret merely sits on their row.
+ *
+ * A non-empty selection reveals the delimiters as soon as it covers part of them.
+ * An empty caret only counts while it is *inside* the run. That is what keeps a
+ * fenced block collapsed the moment it is typed: the auto-pair leaves the caret
+ * right after the opening delimiter (position `to`), so treating that boundary as
+ * "touching" would pop the three backticks straight back into view.
+ */
+function isDelimiterRevealed(state: EditorState, from: number, to: number): boolean {
+	return state.selection.ranges.some((range) =>
+		range.empty ? range.head >= from && range.head < to : range.from < to && range.to > from,
+	);
 }
 
 function collectFenceBlocks(states: readonly FenceLineState[]): FenceBlock[] {
@@ -98,7 +120,17 @@ export function buildMarkdownDecorations(view: EditorView): DecorationSet {
 				continue;
 			}
 			const delimiter = parseFenceDelimiter(line.text);
-			const revealed = !delimiter || isRevealed(state, line.start, line.end);
+			if (!delimiter) {
+				classes.push("cm-code-fence");
+				decorations.push(lineDecoration(classes.join(" ")).range(line.start));
+				continue;
+			}
+			// Everything before the info string is the delimiter run (plus any
+			// indentation); the info string itself stays visible as a label.
+			const hiddenTo = fenceState.isOpeningMarker ? line.end - delimiter.info.length : line.end;
+			const revealed = fenceState.isOpeningMarker
+				? isDelimiterRevealed(state, line.start, hiddenTo)
+				: isRevealed(state, line.start, line.end);
 			if (revealed) {
 				classes.push("cm-code-fence");
 				decorations.push(lineDecoration(classes.join(" ")).range(line.start));
@@ -110,10 +142,8 @@ export function buildMarkdownDecorations(view: EditorView): DecorationSet {
 				classes.push("cm-code-cap-labeled");
 			}
 			decorations.push(lineDecoration(classes.join(" ")).range(line.start));
-			// Keep the info string visible as the cap's label; hide the delimiters.
-			const hideTo = fenceState.isOpeningMarker ? line.start + line.text.length - delimiter.info.length : line.end;
-			if (hideTo > line.start) {
-				decorations.push(hiddenText.range(line.start, hideTo));
+			if (hiddenTo > line.start) {
+				decorations.push(hiddenText.range(line.start, hiddenTo));
 			}
 		}
 	}

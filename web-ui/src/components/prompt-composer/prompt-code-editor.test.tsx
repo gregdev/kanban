@@ -239,6 +239,60 @@ describe("PromptCodeEditor", () => {
 		expect(records.value).toBe("```\n\n```\n");
 	});
 
+	it("collapses the opening delimiter as soon as the block is created", () => {
+		render(<EditorHarness records={records} />);
+		type("``");
+
+		act(() => {
+			const current = view();
+			const caret = current.state.selection.main.head;
+			applyComposerTextInput(current, caret, caret, "`");
+		});
+
+		// The caret sits on the opener so the language can follow, but the ``` never
+		// stays on screen: both delimiter rows become caps of the panel, and the
+		// opener is also the panel's top edge (the header strip).
+		expect(view().state.selection.main.head).toBe(3);
+		expect(container.querySelectorAll(".cm-code-cap").length).toBe(2);
+		expect(container.querySelectorAll(".cm-code-cap.cm-code-block-top").length).toBe(1);
+		expect(container.querySelector(".cm-code-fence")).toBeNull();
+		expect(container.textContent).not.toContain("```");
+	});
+
+	it("keeps the opener collapsed until the delimiter itself is selected", () => {
+		render(<EditorHarness records={records} initialValue={"```ts\ncode\n```"} />);
+
+		// A caret right after the run (where auto-pair leaves it) does not reveal it.
+		act(() => {
+			view().dispatch({ selection: { anchor: 3 } });
+		});
+		expect(container.querySelectorAll(".cm-code-fence").length).toBe(0);
+		expect(container.textContent).not.toContain("```");
+
+		// Selecting part of the run does, so the delimiters stay editable.
+		act(() => {
+			view().dispatch({ selection: { anchor: 0, head: 3 } });
+		});
+		expect(container.querySelectorAll(".cm-code-fence").length).toBe(1);
+		expect(container.textContent).toContain("```ts");
+	});
+
+	it("shows the fence language as a label while it is typed", () => {
+		render(<EditorHarness records={records} initialValue={"```\n\n```\n"} />);
+		act(() => {
+			view().dispatch({ selection: { anchor: 3 } });
+		});
+
+		act(() => {
+			view().dispatch({ changes: { from: 3, insert: "json" }, selection: { anchor: 7 } });
+		});
+
+		expect(container.querySelectorAll(".cm-code-cap-labeled").length).toBe(1);
+		expect(container.textContent).toContain("json");
+		expect(container.textContent).not.toContain("```");
+		expect(container.querySelector(".cm-code-fence")).toBeNull();
+	});
+
 	it("wraps a selection in inline code when a backtick is typed", () => {
 		render(<EditorHarness records={records} initialValue="hello world" />);
 		act(() => {

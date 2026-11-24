@@ -1289,6 +1289,17 @@ body.kb-dependency-link-mode {
   color: var(--color-text-tertiary);
 }
 
+/* The collapsed opener doubles as the block's header strip: auto-pairing leaves
+   the caret on it so the info string can be typed, and the language label lives
+   there. Keep it at a readable line height instead of the 6px sliver the closing
+   cap uses, so the row does not jump when the caret enters it. The font size stays
+   non-zero (the delimiter run is replaced by a widget, so nothing but the label is
+   painted) because the caret is the native one and would otherwise collapse. */
+.kb-prompt-editor .cm-code-block-top.cm-code-cap {
+  font-size: 0.625rem;
+  line-height: 1.125rem;
+}
+
 /* A delimiter row is shown again whenever the selection touches it, so the
    delimiters and the info string stay editable. */
 .kb-prompt-editor .cm-code-fence {
