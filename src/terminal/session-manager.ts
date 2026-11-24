@@ -145,6 +145,13 @@ function isActiveState(state: RuntimeTaskSessionState): boolean {
 	return state === "running" || state === "awaiting_review";
 }
 
+// A persisted summary in one of these states claims that a live process owns the
+// task. A newly started runtime process cannot own it, so startup reconciliation
+// must treat these summaries as interrupted rather than trusting them.
+function isPersistedActiveState(state: RuntimeTaskSessionState): boolean {
+	return state === "running";
+}
+
 function cloneStartTaskSessionRequest(request: StartTaskSessionRequest): StartTaskSessionRequest {
 	return {
 		...request,
@@ -256,6 +263,33 @@ export class TerminalSessionManager implements TerminalSessionService {
 				pendingAutoRestart: null,
 			});
 		}
+	}
+
+	/**
+	 * Startup-only reconciliation for summaries hydrated from persisted workspace
+	 * state. A hydrated entry has no live PTY, so a persisted running summary is a
+	 * lie left behind by a crash, hard kill, or host restart. Mark those sessions
+	 * interrupted (the same shape shutdown uses) so the board, CLI, and project
+	 * counts agree without waiting for a viewer to attach.
+	 */
+	reconcileStaleSessions(): RuntimeTaskSessionSummary[] {
+		const reconciled: RuntimeTaskSessionSummary[] = [];
+		for (const entry of this.entries.values()) {
+			if (entry.active || !isPersistedActiveState(entry.summary.state)) {
+				continue;
+			}
+			const summary = updateSummary(entry, {
+				state: "interrupted",
+				reviewReason: "interrupted",
+				pid: null,
+			});
+			for (const listener of entry.listeners.values()) {
+				listener.onState?.(cloneSummary(summary));
+			}
+			this.emitSummary(summary);
+			reconciled.push(cloneSummary(summary));
+		}
+		return reconciled;
 	}
 
 	getSummary(taskId: string): RuntimeTaskSessionSummary | null {

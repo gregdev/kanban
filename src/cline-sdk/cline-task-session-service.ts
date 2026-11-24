@@ -98,6 +98,12 @@ export interface ClineTaskTurnResumeResult {
 	error?: string;
 }
 
+export interface ClineInterruptedTaskReconcileResult {
+	summary: RuntimeTaskSessionSummary;
+	/** True only when the SDK still has a persisted session we can resume from. */
+	resumable: boolean;
+}
+
 export interface ClineTaskSessionService {
 	onSummary(listener: (summary: RuntimeTaskSessionSummary) => void): () => void;
 	onMessage(listener: (taskId: string, message: ClineTaskMessage) => void): () => void;
@@ -115,6 +121,14 @@ export interface ClineTaskSessionService {
 	reloadTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
 	clearTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
 	rebindPersistedTaskSession(taskId: string): Promise<RuntimeTaskSessionSummary | null>;
+	/**
+	 * Reconcile a summary that was persisted as active before the runtime
+	 * restarted. Cline has no surviving process either, so the summary becomes
+	 * interrupted. Resumability is never assumed: it is derived from the presence
+	 * of an SDK persisted session for the task.
+	 */
+	reconcileInterruptedTaskSession(summary: RuntimeTaskSessionSummary): Promise<ClineInterruptedTaskReconcileResult>;
+	isTaskSessionResumable(taskId: string): Promise<boolean>;
 	getSummary(taskId: string): RuntimeTaskSessionSummary | null;
 	listSummaries(): RuntimeTaskSessionSummary[];
 	listMessages(taskId: string): ClineTaskMessage[];
@@ -646,6 +660,19 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 					error: "This task has no Cline session to resume.",
 				};
 			}
+			// A task without an in-memory entry has no live turn: the runtime that
+			// owned it is gone (restart, crash). Startup reconciliation persists that
+			// as `interrupted`, but the Cline service only learns about a task when it
+			// is touched. Align the rebound entry with the persisted board state so an
+			// interrupted task stays resumable through this path instead of being
+			// rejected as an ordinary review card.
+			if (entry.summary.state !== "interrupted") {
+				updateSummary(entry, {
+					state: "interrupted",
+					reviewReason: "interrupted",
+					pid: null,
+				});
+			}
 		}
 
 		if (entry.summary.state === "running") {
@@ -1037,6 +1064,41 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		});
 		this.messageRepository.setTaskEntry(taskId, entry);
 		return cloneSummary(entry.summary);
+	}
+
+	async isTaskSessionResumable(taskId: string): Promise<boolean> {
+		const snapshot = await this.sessionRuntime.readPersistedTaskSession(taskId).catch(() => null);
+		return snapshot !== null;
+	}
+
+	async reconcileInterruptedTaskSession(
+		summary: RuntimeTaskSessionSummary,
+	): Promise<ClineInterruptedTaskReconcileResult> {
+		const existingEntry = this.messageRepository.getTaskEntry(summary.taskId);
+		if (existingEntry) {
+			return {
+				summary: cloneSummary(existingEntry.summary),
+				resumable: await this.isTaskSessionResumable(summary.taskId),
+			};
+		}
+
+		const reconciledSummary: RuntimeTaskSessionSummary = {
+			...summary,
+			state: "interrupted",
+			reviewReason: "interrupted",
+			pid: null,
+			updatedAt: now(),
+		};
+		const snapshot = await this.sessionRuntime.readPersistedTaskSession(summary.taskId).catch(() => null);
+		if (snapshot) {
+			const entry = createTaskEntryFromPersistedSession(summary.taskId, snapshot.messages, reconciledSummary);
+			this.messageRepository.setTaskEntry(summary.taskId, entry);
+		}
+		this.emitSummary(reconciledSummary);
+		return {
+			summary: reconciledSummary,
+			resumable: snapshot !== null,
+		};
 	}
 
 	getSummary(taskId: string): RuntimeTaskSessionSummary | null {

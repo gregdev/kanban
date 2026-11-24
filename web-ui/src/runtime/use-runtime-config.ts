@@ -16,6 +16,7 @@ export interface UseRuntimeConfigResult {
 		agentCommandTimeoutSec?: number;
 		shortcuts?: RuntimeProjectShortcut[];
 		readyForReviewNotificationsEnabled?: boolean;
+		autoResumeInterruptedTasks?: boolean;
 		commitPromptTemplate?: string;
 		openPrPromptTemplate?: string;
 	}) => Promise<RuntimeConfigResponse | null>;

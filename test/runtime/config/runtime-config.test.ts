@@ -291,6 +291,7 @@ describe("runtime-config auto agent selection", { concurrent: false }, () => {
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
+					autoResumeInterruptedTasks: false,
 					shortcuts: [],
 					commitPromptTemplate: current.commitPromptTemplateDefault,
 					openPrPromptTemplate: current.openPrPromptTemplateDefault,
@@ -336,6 +337,7 @@ describe("runtime-config auto agent selection", { concurrent: false }, () => {
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
+					autoResumeInterruptedTasks: false,
 					shortcuts: [],
 					commitPromptTemplate: current.commitPromptTemplateDefault,
 					openPrPromptTemplate: current.openPrPromptTemplateDefault,
@@ -363,6 +365,7 @@ describe("runtime-config auto agent selection", { concurrent: false }, () => {
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
+					autoResumeInterruptedTasks: false,
 					shortcuts: [{ label: "Ship", command: "npm run ship", icon: "rocket" }],
 					commitPromptTemplate: current.commitPromptTemplateDefault,
 					openPrPromptTemplate: current.openPrPromptTemplateDefault,
@@ -660,6 +663,7 @@ describe("runtime-config auto agent selection", { concurrent: false }, () => {
 						selectedShortcutLabel: null,
 						agentAutonomousModeEnabled: true,
 						readyForReviewNotificationsEnabled: true,
+						autoResumeInterruptedTasks: false,
 						shortcuts: [],
 						commitPromptTemplate: current.commitPromptTemplateDefault,
 						openPrPromptTemplate: current.openPrPromptTemplateDefault,
@@ -710,6 +714,75 @@ describe("runtime-config auto agent selection", { concurrent: false }, () => {
 				const reloaded = await loadRuntimeConfig(tempProject);
 				expect(reloaded.selectedAgentId).toBe("codex");
 				expect(reloaded.agentAutonomousModeEnabled).toBe(false);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+	it("defaults autoResumeInterruptedTasks to disabled", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-auto-resume-default-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-auto-resume-default-",
+		);
+
+		try {
+			const runtimeConfigDir = join(tempHome, ".cline", "kanban");
+			mkdirSync(runtimeConfigDir, { recursive: true });
+			writeFileSync(join(runtimeConfigDir, "config.json"), "{}", "utf8");
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const current = await loadRuntimeConfig(tempProject);
+				expect(current.autoResumeInterruptedTasks).toBe(false);
+
+				await saveRuntimeConfig(tempProject, {
+					selectedAgentId: "cline",
+					selectedShortcutLabel: null,
+					agentAutonomousModeEnabled: true,
+					readyForReviewNotificationsEnabled: true,
+					shortcuts: [],
+					commitPromptTemplate: current.commitPromptTemplateDefault,
+					openPrPromptTemplate: current.openPrPromptTemplateDefault,
+					autoResumeInterruptedTasks: false,
+				});
+
+				const persisted = JSON.parse(readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8")) as {
+					autoResumeInterruptedTasks?: boolean;
+				};
+				expect(persisted.autoResumeInterruptedTasks).toBeUndefined();
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("persists the autoResumeInterruptedTasks opt-in", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-auto-resume-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-auto-resume-",
+		);
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				await loadRuntimeConfig(tempProject);
+				const enabled = await updateRuntimeConfig(tempProject, {
+					autoResumeInterruptedTasks: true,
+				});
+				expect(enabled.autoResumeInterruptedTasks).toBe(true);
+
+				const persisted = JSON.parse(readFileSync(join(tempHome, ".cline", "kanban", "config.json"), "utf8")) as {
+					autoResumeInterruptedTasks?: boolean;
+				};
+				expect(persisted.autoResumeInterruptedTasks).toBe(true);
+
+				const reloaded = await loadRuntimeConfig(tempProject);
+				expect(reloaded.autoResumeInterruptedTasks).toBe(true);
+
+				const disabled = await updateRuntimeConfig(tempProject, {
+					autoResumeInterruptedTasks: false,
+				});
+				expect(disabled.autoResumeInterruptedTasks).toBe(false);
 			});
 		} finally {
 			cleanupProject();

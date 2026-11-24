@@ -47,6 +47,8 @@ import { createWorkspaceApi } from "../trpc/workspace-api";
 import { getWebUiDir, normalizeRequestPath, readAsset } from "./assets";
 import { handleHttpRequest, handleSocketUpgrade } from "./middleware";
 import type { RuntimeStateHub } from "./runtime-state-hub";
+import { runStartupAutoResume, type StartupAutoResumeSession } from "./startup-auto-resume";
+import { startWorkspaceTaskSession } from "./task-session-start";
 import type { WorkspaceRegistry } from "./workspace-registry";
 
 interface DisposeTrackedWorkspaceResult {
@@ -495,6 +497,48 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 	const url = activeWorkspaceId
 		? buildKanbanRuntimeUrl(`/${encodeURIComponent(activeWorkspaceId)}`)
 		: getKanbanRuntimeOrigin();
+
+	// Opt-in only: reconcile already made every stale task safe to restore. When
+	// the user asked for auto-resume, start a bounded number of them now without
+	// blocking server startup or waiting for a browser session.
+	void (async () => {
+		if (deps.workspaceRegistry.getActiveRuntimeConfig().autoResumeInterruptedTasks !== true) {
+			return;
+		}
+		const reconciledSessions: StartupAutoResumeSession[] = [];
+		for (const workspace of deps.workspaceRegistry.listManagedWorkspaces()) {
+			if (!workspace.workspacePath) {
+				continue;
+			}
+			for (const summary of deps.workspaceRegistry.getStartupReconciledSessions(workspace.workspaceId)) {
+				reconciledSessions.push({
+					workspaceId: workspace.workspaceId,
+					workspacePath: workspace.workspacePath,
+					summary,
+				});
+			}
+		}
+		await runStartupAutoResume({
+			listReconciledSessions: () => reconciledSessions,
+			loadScopedRuntimeConfig: deps.workspaceRegistry.loadScopedRuntimeConfig,
+			getScopedClineTaskSessionService,
+			startTaskSession: (scope, request) =>
+				startWorkspaceTaskSession(
+					{
+						getScopedTerminalManager,
+						getScopedClineTaskSessionService,
+						loadScopedRuntimeConfig: deps.workspaceRegistry.loadScopedRuntimeConfig,
+						broadcastTaskChatCleared: deps.runtimeStateHub.broadcastTaskChatCleared,
+					},
+					scope,
+					request,
+				),
+			warn: deps.warn,
+		});
+	})().catch((error: unknown) => {
+		const message = error instanceof Error ? error.message : String(error);
+		deps.warn(`Startup auto-resume failed. ${message}`);
+	});
 
 	return {
 		url,

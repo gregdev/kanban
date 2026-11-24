@@ -1325,6 +1325,130 @@ describe("InMemoryClineTaskSessionService", () => {
 			);
 		});
 	});
+	it("reconciles a persisted running Cline summary to interrupted and reports resumability from persisted history", async () => {
+		const { service, runtime } = createTrackedService();
+		runtime.readPersistedTaskSessionMock.mockResolvedValue({
+			record: {
+				sessionId: "task-1-persisted",
+				source: "core" as ClinePersistedTaskSessionSnapshot["record"]["source"],
+				status: "completed",
+				startedAt: "2026-03-17T10:00:00.000Z",
+				updatedAt: "2026-03-17T10:05:00.000Z",
+				interactive: true,
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				cwd: "/tmp/worktree",
+				workspaceRoot: "/tmp/workspace-root",
+				enableTools: true,
+				enableSpawn: false,
+				enableTeams: false,
+				isSubagent: false,
+			},
+			messages: [
+				{ role: "user", content: "Recovered prompt" },
+				{ role: "assistant", content: "Recovered answer" },
+			],
+		});
+
+		const reconciliation = await service.reconcileInterruptedTaskSession({
+			taskId: "task-1",
+			state: "running",
+			agentId: "cline",
+			workspacePath: "/tmp/worktree",
+			pid: 4242,
+			startedAt: 1,
+			updatedAt: 1,
+			lastOutputAt: 1,
+			reviewReason: null,
+			exitCode: null,
+			lastHookAt: null,
+			latestHookActivity: null,
+		});
+
+		expect(reconciliation.summary.state).toBe("interrupted");
+		expect(reconciliation.summary.reviewReason).toBe("interrupted");
+		expect(reconciliation.summary.pid).toBeNull();
+		expect(reconciliation.resumable).toBe(true);
+		expect(service.listMessages("task-1").map((message) => message.content)).toEqual([
+			"Recovered prompt",
+			"Recovered answer",
+		]);
+		expect(service.getSummary("task-1")?.state).toBe("interrupted");
+	});
+
+	it("does not assume a Cline task is resumable when no persisted session exists", async () => {
+		const { service, runtime } = createTrackedService();
+		runtime.readPersistedTaskSessionMock.mockResolvedValue(null);
+
+		const reconciliation = await service.reconcileInterruptedTaskSession({
+			taskId: "task-1",
+			state: "running",
+			agentId: "cline",
+			workspacePath: "/tmp/worktree",
+			pid: 4242,
+			startedAt: 1,
+			updatedAt: 1,
+			lastOutputAt: 1,
+			reviewReason: null,
+			exitCode: null,
+			lastHookAt: null,
+			latestHookActivity: null,
+		});
+
+		expect(reconciliation.summary.state).toBe("interrupted");
+		expect(reconciliation.summary.pid).toBeNull();
+		expect(reconciliation.resumable).toBe(false);
+		expect(await service.isTaskSessionResumable("task-1")).toBe(false);
+	});
+
+	it("resumes a task reconciled by startup even though the runtime lost its entry", async () => {
+		const { service, runtime } = createTrackedService();
+		// A fresh runtime process: only the persisted session survives, and startup
+		// reconciliation rewrote the board summary to interrupted without creating
+		// an in-memory Cline entry.
+		runtime.readPersistedTaskSessionMock.mockResolvedValue({
+			record: {
+				sessionId: "task-1-persisted",
+				source: "core" as ClinePersistedTaskSessionSnapshot["record"]["source"],
+				status: "completed",
+				startedAt: "2026-03-17T10:00:00.000Z",
+				updatedAt: "2026-03-17T10:05:00.000Z",
+				interactive: true,
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				cwd: "/tmp/worktree",
+				workspaceRoot: "/tmp/workspace-root",
+				enableTools: true,
+				enableSpawn: false,
+				enableTeams: false,
+				isSubagent: false,
+			},
+			messages: [
+				{ role: "user", content: "Interrupted prompt" },
+				{ role: "assistant", content: "Partial answer" },
+			],
+		});
+
+		const result = await service.resumeTaskTurn("task-1");
+
+		expect(result.outcome).toBe("resumed");
+		expect(result.summary?.state).toBe("running");
+		await vi.waitFor(() => {
+			expect(runtime.resumeTaskTurnMock).toHaveBeenCalledTimes(1);
+		});
+		expect(runtime.resumeTaskTurnMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				taskId: "task-1",
+				prompt: expect.stringContaining("Continue the interrupted turn"),
+			}),
+		);
+		// Only the original user prompt is in the transcript; the resume
+		// instruction is never re-added as a user message.
+		expect(service.listMessages("task-1").filter((message) => message.role === "user")).toEqual([
+			expect.objectContaining({ content: "Interrupted prompt" }),
+		]);
+	});
+
 	it("marks session interrupted when stopped", async () => {
 		const { service } = createTrackedService();
 		await service.startTaskSession({

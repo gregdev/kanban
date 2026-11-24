@@ -4,6 +4,7 @@ import type {
 	RuntimeBoardData,
 	RuntimeProjectSummary,
 	RuntimeProjectTaskCounts,
+	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract";
 import {
@@ -16,6 +17,7 @@ import {
 	removeWorkspaceStateFiles,
 } from "../state/workspace-state";
 import { TerminalSessionManager } from "../terminal/session-manager";
+import { reconcileStartupWorkspaceSessions } from "./startup-session-reconciler";
 
 export interface WorkspaceRegistryScope {
 	workspaceId: string;
@@ -29,6 +31,7 @@ export interface CreateWorkspaceRegistryDependencies {
 	hasGitRepository: (path: string) => boolean;
 	pathIsDirectory: (path: string) => Promise<boolean>;
 	onTerminalManagerReady?: (workspaceId: string, manager: TerminalSessionManager) => void;
+	warn?: (message: string) => void;
 }
 
 export interface DisposeWorkspaceRegistryOptions {
@@ -89,6 +92,11 @@ export interface WorkspaceRegistry {
 		workspacePath: string | null;
 		terminalManager: TerminalSessionManager;
 	}>;
+	/**
+	 * Sessions that were persisted as running/starting when this process started
+	 * and were reconciled to interrupted. Used by optional startup auto-resume.
+	 */
+	getStartupReconciledSessions: (workspaceId: string) => RuntimeTaskSessionSummary[];
 }
 
 function createEmptyProjectTaskCounts(): RuntimeProjectTaskCounts {
@@ -204,6 +212,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 	const projectTaskCountsByWorkspaceId = new Map<string, RuntimeProjectTaskCounts>();
 	const terminalManagersByWorkspaceId = new Map<string, TerminalSessionManager>();
 	const terminalManagerLoadPromises = new Map<string, Promise<TerminalSessionManager>>();
+	const startupReconciledSessionsByWorkspaceId = new Map<string, RuntimeTaskSessionSummary[]>();
 
 	const rememberWorkspace = (workspaceId: string, repoPath: string): void => {
 		workspacePathsById.set(workspaceId, repoPath);
@@ -237,9 +246,26 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			const manager = new TerminalSessionManager();
 			try {
 				const existingWorkspace = await loadWorkspaceState(repoPath);
-				manager.hydrateFromRecord(existingWorkspace.sessions);
-			} catch {
-				// Workspace state will be created on demand.
+				// Native Cline summaries are owned by the Cline session service. Hydrating
+				// them into the PTY manager would let a stale persisted summary override
+				// the live Cline service for the rest of the process lifetime.
+				const terminalSessions = Object.fromEntries(
+					Object.entries(existingWorkspace.sessions).filter(([, summary]) => summary.agentId !== "cline"),
+				);
+				manager.hydrateFromRecord(terminalSessions);
+				// Reconcile immediately after hydration. Waiting for a viewer to attach
+				// leaves phantom `running` sessions on the board and in CLI output.
+				const reconciled = await reconcileStartupWorkspaceSessions({
+					workspacePath: repoPath,
+					terminalManager: manager,
+					persistedSessions: existingWorkspace.sessions,
+				});
+				if (reconciled.reconciledSummaries.length > 0) {
+					startupReconciledSessionsByWorkspaceId.set(workspaceId, reconciled.reconciledSummaries);
+				}
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				deps.warn?.(`Could not reconcile persisted task sessions for ${repoPath}. ${message}`);
 			}
 			terminalManagersByWorkspaceId.set(workspaceId, manager);
 			return manager;
@@ -280,6 +306,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			terminalManagerLoadPromises.delete(workspaceId);
 		}
 		projectTaskCountsByWorkspaceId.delete(workspaceId);
+		startupReconciledSessionsByWorkspaceId.delete(workspaceId);
 		const workspacePath = workspacePathsById.get(workspaceId) ?? null;
 		workspacePathsById.delete(workspaceId);
 		return {
@@ -471,5 +498,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 				terminalManager,
 			}));
 		},
+		getStartupReconciledSessions: (workspaceId: string) =>
+			(startupReconciledSessionsByWorkspaceId.get(workspaceId) ?? []).map((summary) => ({ ...summary })),
 	};
 }

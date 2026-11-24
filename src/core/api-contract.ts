@@ -968,6 +968,8 @@ export const runtimeConfigResponseSchema = z.object({
 	globalConfigPath: z.string(),
 	projectConfigPath: z.string().nullable(),
 	readyForReviewNotificationsEnabled: z.boolean(),
+	/** Opt-in: resume tasks that were running when the previous runtime died. */
+	autoResumeInterruptedTasks: z.boolean().optional(),
 	detectedCommands: z.array(z.string()),
 	agents: z.array(runtimeAgentDefinitionSchema),
 	shortcuts: z.array(runtimeProjectShortcutSchema),
@@ -991,6 +993,7 @@ export const runtimeConfigSaveRequestSchema = z.object({
 		.optional(),
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
+	autoResumeInterruptedTasks: z.boolean().optional(),
 	commitPromptTemplate: z.string().optional(),
 	openPrPromptTemplate: z.string().optional(),
 });

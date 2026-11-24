@@ -31,6 +31,7 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		openPrPromptTemplateDefault: "pr",
 		agentEnv: {},
 		agentPathPrepend: [],
+		autoResumeInterruptedTasks: false,
 		...overrides,
 	};
 }

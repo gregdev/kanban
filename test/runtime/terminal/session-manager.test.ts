@@ -84,6 +84,55 @@ describe("TerminalSessionManager", () => {
 		expect(recovered?.reviewReason).toBeNull();
 	});
 
+	it("reconciles hydrated running sessions to interrupted without waiting for a viewer", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-running": createSummary({ taskId: "task-running", state: "running", pid: 4321 }),
+			"task-review": createSummary({ taskId: "task-review", state: "awaiting_review", pid: 4322 }),
+			"task-idle": createSummary({ taskId: "task-idle", state: "idle", pid: null }),
+		});
+
+		const reconciled = manager.reconcileStaleSessions();
+
+		expect(reconciled.map((summary) => summary.taskId)).toEqual(["task-running"]);
+		const runningSummary = manager.getSummary("task-running");
+		expect(runningSummary?.state).toBe("interrupted");
+		expect(runningSummary?.reviewReason).toBe("interrupted");
+		expect(runningSummary?.pid).toBeNull();
+		// Agent identity survives so restore-from-trash resumes with the same runtime.
+		expect(runningSummary?.agentId).toBe("claude");
+		// awaiting_review is already a settled state; only live-looking sessions change.
+		expect(manager.getSummary("task-review")?.state).toBe("awaiting_review");
+		expect(manager.getSummary("task-idle")?.state).toBe("idle");
+	});
+
+	it("does not reconcile a summary that has a live process", () => {
+		const manager = new TerminalSessionManager();
+		const entry = {
+			summary: createSummary({ taskId: "task-live", state: "running", pid: 999 }),
+			active: {
+				session: {},
+			},
+			terminalStateMirror: null,
+			listenerIdCounter: 1,
+			listeners: new Map(),
+			restartRequest: null,
+			suppressAutoRestartOnExit: false,
+			autoRestartTimestamps: [],
+			pendingAutoRestart: null,
+		};
+		(
+			manager as unknown as {
+				entries: Map<string, typeof entry>;
+			}
+		).entries.set("task-live", entry);
+
+		const reconciled = manager.reconcileStaleSessions();
+
+		expect(reconciled).toEqual([]);
+		expect(manager.getSummary("task-live")?.state).toBe("running");
+	});
+
 	it("tracks only the latest two turn checkpoints", () => {
 		const manager = new TerminalSessionManager();
 		manager.hydrateFromRecord({

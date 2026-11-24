@@ -36,6 +36,12 @@ interface RuntimeGlobalConfigFileShape {
 	openPrPromptTemplate?: string;
 	agentEnv?: Record<string, string>;
 	agentPathPrepend?: string[];
+	/**
+	 * When true, Kanban resumes tasks that were running when the previous runtime
+	 * process died. This consumes model tokens for every resumed turn, so it stays
+	 * opt-in and is bounded per startup.
+	 */
+	autoResumeInterruptedTasks?: boolean;
 }
 
 interface RuntimeProjectConfigFileShape {
@@ -58,6 +64,7 @@ export interface RuntimeConfigState {
 	openPrPromptTemplateDefault: string;
 	agentEnv: Record<string, string>;
 	agentPathPrepend: string[];
+	autoResumeInterruptedTasks: boolean;
 }
 
 export interface RuntimeConfigUpdateInput {
@@ -71,12 +78,14 @@ export interface RuntimeConfigUpdateInput {
 	openPrPromptTemplate?: string;
 	agentEnv?: Record<string, string>;
 	agentPathPrepend?: string[];
+	autoResumeInterruptedTasks?: boolean;
 }
 
 const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
 const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "codex", "droid", "kiro"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
+const DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS = false;
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
 
 - Do not run destructive commands: git reset --hard, git clean -fdx, git worktree remove, rm/mv on repository paths.
@@ -310,6 +319,10 @@ function toRuntimeConfigState({
 		openPrPromptTemplateDefault: DEFAULT_OPEN_PR_PROMPT_TEMPLATE,
 		agentEnv: normalizeAgentEnv(globalConfig?.agentEnv),
 		agentPathPrepend: normalizeAgentPathPrepend(globalConfig?.agentPathPrepend),
+		autoResumeInterruptedTasks: normalizeBoolean(
+			globalConfig?.autoResumeInterruptedTasks,
+			DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS,
+		),
 	};
 }
 
@@ -334,6 +347,7 @@ async function writeRuntimeGlobalConfigFile(
 		openPrPromptTemplate?: string;
 		agentEnv?: Record<string, string>;
 		agentPathPrepend?: string[];
+		autoResumeInterruptedTasks?: boolean;
 	},
 ): Promise<void> {
 	const existing = await readRuntimeConfigFile<RuntimeGlobalConfigFileShape>(configPath);
@@ -361,6 +375,10 @@ async function writeRuntimeGlobalConfigFile(
 		config.readyForReviewNotificationsEnabled === undefined
 			? DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED
 			: normalizeBoolean(config.readyForReviewNotificationsEnabled, DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED);
+	const autoResumeInterruptedTasks =
+		config.autoResumeInterruptedTasks === undefined
+			? normalizeBoolean(existing?.autoResumeInterruptedTasks, DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS)
+			: normalizeBoolean(config.autoResumeInterruptedTasks, DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS);
 	const commitPromptTemplate =
 		config.commitPromptTemplate === undefined
 			? DEFAULT_COMMIT_PROMPT_TEMPLATE
@@ -400,6 +418,12 @@ async function writeRuntimeGlobalConfigFile(
 		readyForReviewNotificationsEnabled !== DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED
 	) {
 		payload.readyForReviewNotificationsEnabled = readyForReviewNotificationsEnabled;
+	}
+	if (
+		hasOwnKey(existing, "autoResumeInterruptedTasks") ||
+		autoResumeInterruptedTasks !== DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS
+	) {
+		payload.autoResumeInterruptedTasks = autoResumeInterruptedTasks;
 	}
 	if (hasOwnKey(existing, "commitPromptTemplate") || commitPromptTemplate !== DEFAULT_COMMIT_PROMPT_TEMPLATE) {
 		payload.commitPromptTemplate = commitPromptTemplate;
@@ -511,6 +535,7 @@ function createRuntimeConfigStateFromValues(input: {
 	openPrPromptTemplate: string;
 	agentEnv?: Record<string, string>;
 	agentPathPrepend?: string[];
+	autoResumeInterruptedTasks?: boolean;
 }): RuntimeConfigState {
 	return {
 		globalConfigPath: input.globalConfigPath,
@@ -533,6 +558,10 @@ function createRuntimeConfigStateFromValues(input: {
 		openPrPromptTemplateDefault: DEFAULT_OPEN_PR_PROMPT_TEMPLATE,
 		agentEnv: normalizeAgentEnv(input.agentEnv),
 		agentPathPrepend: normalizeAgentPathPrepend(input.agentPathPrepend),
+		autoResumeInterruptedTasks: normalizeBoolean(
+			input.autoResumeInterruptedTasks,
+			DEFAULT_AUTO_RESUME_INTERRUPTED_TASKS,
+		),
 	};
 }
 
@@ -550,6 +579,7 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		openPrPromptTemplate: current.openPrPromptTemplate,
 		agentEnv: current.agentEnv,
 		agentPathPrepend: current.agentPathPrepend,
+		autoResumeInterruptedTasks: current.autoResumeInterruptedTasks,
 	});
 }
 
@@ -588,6 +618,7 @@ export async function saveRuntimeConfig(
 		openPrPromptTemplate: string;
 		agentEnv?: Record<string, string>;
 		agentPathPrepend?: string[];
+		autoResumeInterruptedTasks: boolean;
 	},
 ): Promise<RuntimeConfigState> {
 	const { globalConfigPath, projectConfigPath } = resolveRuntimeConfigPaths(cwd);
@@ -602,6 +633,7 @@ export async function saveRuntimeConfig(
 			openPrPromptTemplate: config.openPrPromptTemplate,
 			agentEnv: config.agentEnv,
 			agentPathPrepend: config.agentPathPrepend,
+			autoResumeInterruptedTasks: config.autoResumeInterruptedTasks,
 		});
 		await writeRuntimeProjectConfigFile(projectConfigPath, { shortcuts: config.shortcuts });
 		return createRuntimeConfigStateFromValues({
@@ -617,6 +649,7 @@ export async function saveRuntimeConfig(
 			openPrPromptTemplate: config.openPrPromptTemplate,
 			agentEnv: config.agentEnv,
 			agentPathPrepend: config.agentPathPrepend,
+			autoResumeInterruptedTasks: config.autoResumeInterruptedTasks,
 		});
 	});
 }
@@ -647,6 +680,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 				updates.agentPathPrepend === undefined
 					? current.agentPathPrepend
 					: normalizeAgentPathPrepend(updates.agentPathPrepend),
+			autoResumeInterruptedTasks: updates.autoResumeInterruptedTasks ?? current.autoResumeInterruptedTasks,
 		};
 
 		const hasChanges =
@@ -659,6 +693,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate ||
 			!areAgentEnvValuesEqual(nextConfig.agentEnv, current.agentEnv) ||
 			!areAgentPathPrependValuesEqual(nextConfig.agentPathPrepend, current.agentPathPrepend) ||
+			nextConfig.autoResumeInterruptedTasks !== current.autoResumeInterruptedTasks ||
 			!areRuntimeProjectShortcutsEqual(nextConfig.shortcuts, current.shortcuts);
 
 		if (!hasChanges) {
@@ -675,6 +710,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 			agentEnv: nextConfig.agentEnv,
 			agentPathPrepend: nextConfig.agentPathPrepend,
+			autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
 		});
 		await writeRuntimeProjectConfigFile(projectConfigPath, {
 			shortcuts: nextConfig.shortcuts,
@@ -692,6 +728,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 			agentEnv: nextConfig.agentEnv,
 			agentPathPrepend: nextConfig.agentPathPrepend,
+			autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
 		});
 	});
 }
@@ -730,6 +767,7 @@ export async function updateGlobalRuntimeConfig(
 					updates.agentPathPrepend === undefined
 						? current.agentPathPrepend
 						: normalizeAgentPathPrepend(updates.agentPathPrepend),
+				autoResumeInterruptedTasks: updates.autoResumeInterruptedTasks ?? current.autoResumeInterruptedTasks,
 			};
 
 			const hasChanges =
@@ -741,7 +779,8 @@ export async function updateGlobalRuntimeConfig(
 				nextConfig.commitPromptTemplate !== current.commitPromptTemplate ||
 				nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate ||
 				!areAgentEnvValuesEqual(nextConfig.agentEnv, current.agentEnv) ||
-				!areAgentPathPrependValuesEqual(nextConfig.agentPathPrepend, current.agentPathPrepend);
+				!areAgentPathPrependValuesEqual(nextConfig.agentPathPrepend, current.agentPathPrepend) ||
+				nextConfig.autoResumeInterruptedTasks !== current.autoResumeInterruptedTasks;
 
 			if (!hasChanges) {
 				return current;
@@ -757,6 +796,7 @@ export async function updateGlobalRuntimeConfig(
 				openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 				agentEnv: nextConfig.agentEnv,
 				agentPathPrepend: nextConfig.agentPathPrepend,
+				autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
 			});
 
 			return createRuntimeConfigStateFromValues({
@@ -772,6 +812,7 @@ export async function updateGlobalRuntimeConfig(
 				openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 				agentEnv: nextConfig.agentEnv,
 				agentPathPrepend: nextConfig.agentPathPrepend,
+				autoResumeInterruptedTasks: nextConfig.autoResumeInterruptedTasks,
 			});
 		},
 	);

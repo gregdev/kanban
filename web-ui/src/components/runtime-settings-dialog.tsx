@@ -382,6 +382,7 @@ export function RuntimeSettingsDialog({
 	const [agentAutonomousModeEnabled, setAgentAutonomousModeEnabled] = useState(true);
 	const [agentCommandTimeoutSec, setAgentCommandTimeoutSec] = useState(DEFAULT_AGENT_COMMAND_TIMEOUT_SEC);
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
+	const [autoResumeInterruptedTasks, setAutoResumeInterruptedTasks] = useState(false);
 	const [initialThemeId, setInitialThemeId] = useState<ThemeId>(readStoredThemeId);
 	const [draftThemeId, setDraftThemeId] = useState<ThemeId>(readStoredThemeId);
 	const [notificationPermission, setNotificationPermission] = useState<BrowserNotificationPermission>("unsupported");
@@ -457,6 +458,7 @@ export function RuntimeSettingsDialog({
 	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
 	const initialAgentCommandTimeoutSec = config?.agentCommandTimeoutSec ?? DEFAULT_AGENT_COMMAND_TIMEOUT_SEC;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
+	const initialAutoResumeInterruptedTasks = config?.autoResumeInterruptedTasks ?? false;
 	const initialShortcuts = config?.shortcuts ?? [];
 	const initialCommitPromptTemplate = config?.commitPromptTemplate ?? "";
 	const initialOpenPrPromptTemplate = config?.openPrPromptTemplate ?? "";
@@ -488,6 +490,9 @@ export function RuntimeSettingsDialog({
 		if (readyForReviewNotificationsEnabled !== initialReadyForReviewNotificationsEnabled) {
 			return true;
 		}
+		if (autoResumeInterruptedTasks !== initialAutoResumeInterruptedTasks) {
+			return true;
+		}
 		if (clineSettings.hasUnsavedChanges) {
 			return true;
 		}
@@ -513,6 +518,7 @@ export function RuntimeSettingsDialog({
 	}, [
 		agentAutonomousModeEnabled,
 		agentCommandTimeoutSec,
+		autoResumeInterruptedTasks,
 		clineMcpSettings.hasUnsavedChanges,
 		clineSettings.hasUnsavedChanges,
 		commitPromptTemplate,
@@ -520,6 +526,7 @@ export function RuntimeSettingsDialog({
 		draftThemeId,
 		initialAgentAutonomousModeEnabled,
 		initialAgentCommandTimeoutSec,
+		initialAutoResumeInterruptedTasks,
 		initialCommitPromptTemplate,
 		initialOpenPrPromptTemplate,
 		initialReadyForReviewNotificationsEnabled,
@@ -540,6 +547,7 @@ export function RuntimeSettingsDialog({
 		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
 		setAgentCommandTimeoutSec(config?.agentCommandTimeoutSec ?? DEFAULT_AGENT_COMMAND_TIMEOUT_SEC);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
+		setAutoResumeInterruptedTasks(config?.autoResumeInterruptedTasks ?? false);
 		setShortcuts(config?.shortcuts ?? []);
 		setCommitPromptTemplate(config?.commitPromptTemplate ?? "");
 		setOpenPrPromptTemplate(config?.openPrPromptTemplate ?? "");
@@ -547,6 +555,7 @@ export function RuntimeSettingsDialog({
 	}, [
 		config?.agentAutonomousModeEnabled,
 		config?.agentCommandTimeoutSec,
+		config?.autoResumeInterruptedTasks,
 		config?.commitPromptTemplate,
 		config?.openPrPromptTemplate,
 		config?.readyForReviewNotificationsEnabled,
@@ -724,6 +733,7 @@ export function RuntimeSettingsDialog({
 			agentAutonomousModeEnabled,
 			agentCommandTimeoutSec: clampAgentCommandTimeoutSec(agentCommandTimeoutSec),
 			readyForReviewNotificationsEnabled,
+			autoResumeInterruptedTasks,
 			shortcuts,
 			commitPromptTemplate,
 			openPrPromptTemplate,
@@ -865,6 +875,25 @@ export function RuntimeSettingsDialog({
 								</p>
 							</div>
 						) : null}
+						<div className="mt-4 border-t border-border pt-3">
+							<div className="flex items-center gap-2">
+								<RadixSwitch.Root
+									checked={autoResumeInterruptedTasks}
+									disabled={controlsDisabled}
+									onCheckedChange={setAutoResumeInterruptedTasks}
+									className="relative h-5 w-9 rounded-full bg-surface-4 data-[state=checked]:bg-accent cursor-pointer disabled:opacity-40"
+								>
+									<RadixSwitch.Thumb className="block h-4 w-4 rounded-full bg-white shadow-sm transition-transform translate-x-0.5 data-[state=checked]:translate-x-[18px]" />
+								</RadixSwitch.Root>
+								<span className="text-[13px] text-text-primary">Resume tasks interrupted by a restart</span>
+							</div>
+							<p className="text-text-secondary text-[13px] ml-11 mt-1 mb-0">
+								When the runtime restarts, automatically resume up to 3 tasks that were running. Resumed turns
+								send the previous conversation back to the model provider, so this can consume tokens and incur
+								cost without any further action from you. Tasks whose agent is not installed or whose Cline
+								session was not persisted stay in Done for manual review.
+							</p>
+						</div>
 					</div>
 
 					{/* ---- Cline ---- */}

@@ -494,6 +494,9 @@ async function startServer(): Promise<{
 			runtimeStateHub?.trackTerminalManager(workspaceId, manager);
 			autoReviewReconciler?.trackWorkspace(workspaceId);
 		},
+		warn: (message) => {
+			console.warn(`[kanban] ${message}`);
+		},
 	});
 	runtimeStateHub = createRuntimeStateHub({
 		workspaceRegistry,

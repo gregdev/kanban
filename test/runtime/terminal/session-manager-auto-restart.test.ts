@@ -158,6 +158,33 @@ describe("TerminalSessionManager auto-restart", () => {
 		expect(session.write).toHaveBeenCalledTimes(1);
 	});
 
+	it("does not spawn a PTY while reconciling a hydrated stale session", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": {
+				taskId: "task-1",
+				state: "running",
+				agentId: "codex",
+				workspacePath: "/tmp/task-1",
+				pid: 111,
+				startedAt: 1,
+				updatedAt: 1,
+				lastOutputAt: 1,
+				reviewReason: null,
+				exitCode: null,
+				lastHookAt: null,
+				latestHookActivity: null,
+			},
+		});
+
+		const reconciled = manager.reconcileStaleSessions();
+
+		expect(reconciled.map((summary) => summary.taskId)).toEqual(["task-1"]);
+		expect(manager.getSummary("task-1")?.state).toBe("interrupted");
+		expect(manager.getSummary("task-1")?.reviewReason).toBe("interrupted");
+		expect(ptySessionSpawnMock).not.toHaveBeenCalled();
+	});
+
 	it("sends deferred Codex startup input when the startup UI header appears", async () => {
 		const deferredStartupInput = "\u001b[200~/plan Validate startup UI detect\u001b[201~\r";
 		prepareAgentLaunchMock.mockResolvedValue({

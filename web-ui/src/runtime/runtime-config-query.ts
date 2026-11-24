@@ -47,6 +47,7 @@ export async function saveRuntimeConfig(
 		agentCommandTimeoutSec?: number;
 		shortcuts?: RuntimeProjectShortcut[];
 		readyForReviewNotificationsEnabled?: boolean;
+		autoResumeInterruptedTasks?: boolean;
 		commitPromptTemplate?: string;
 		openPrPromptTemplate?: string;
 	},

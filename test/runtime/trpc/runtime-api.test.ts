@@ -190,6 +190,7 @@ function createRuntimeConfigState(): RuntimeConfigState {
 		openPrPromptTemplateDefault: "pr",
 		agentEnv: {},
 		agentPathPrepend: [],
+		autoResumeInterruptedTasks: false,
 		globalConfigPath: "/tmp/global-config.json",
 		projectConfigPath: "/tmp/project-config.json",
 	};
