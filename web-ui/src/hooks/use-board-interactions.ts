@@ -511,9 +511,6 @@ export function useBoardInteractions({
 			stopTaskSession,
 			cleanupTaskWorkspace,
 			maybeRequestNotificationPermissionForTaskStart,
-			kickoffTaskInProgress,
-			startBacklogTaskWithAnimation,
-			waitForBacklogStartAnimationAvailability: waitForProgrammaticCardMoveAvailability,
 		});
 
 	useEffect(() => {

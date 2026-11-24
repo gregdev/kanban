@@ -45,6 +45,7 @@ import { createProjectsApi } from "../trpc/projects-api";
 import { createRuntimeApi } from "../trpc/runtime-api";
 import { createWorkspaceApi } from "../trpc/workspace-api";
 import { getWebUiDir, normalizeRequestPath, readAsset } from "./assets";
+import { startReadyDependentTasks } from "./linked-task-autostart";
 import { handleHttpRequest, handleSocketUpgrade } from "./middleware";
 import type { RuntimeStateHub } from "./runtime-state-hub";
 import { runStartupAutoResume, type StartupAutoResumeSession } from "./startup-auto-resume";
@@ -221,6 +222,39 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				broadcastRuntimeWorkspaceStateUpdated: deps.runtimeStateHub.broadcastRuntimeWorkspaceStateUpdated,
 				broadcastRuntimeProjectsUpdated: deps.runtimeStateHub.broadcastRuntimeProjectsUpdated,
 				buildWorkspaceStateSnapshot: deps.workspaceRegistry.buildWorkspaceStateSnapshot,
+				autoStartReadyDependentTasks: (workspaceScope, input) =>
+					startReadyDependentTasks(
+						{
+							startTaskSession: (taskScope, request) =>
+								startWorkspaceTaskSession(
+									{
+										getScopedTerminalManager,
+										getScopedClineTaskSessionService,
+										loadScopedRuntimeConfig: deps.workspaceRegistry.loadScopedRuntimeConfig,
+										broadcastTaskChatCleared: deps.runtimeStateHub.broadcastTaskChatCleared,
+									},
+									taskScope,
+									request,
+								),
+							isTaskSessionRunning: async (taskScope, taskId) => {
+								const terminalManager = await getScopedTerminalManager(taskScope);
+								if (terminalManager.getSummary(taskId)?.state === "running") {
+									return true;
+								}
+								// Only consult an already-created Cline service; a running
+								// Cline task always has one, and creating one here would boot
+								// more machinery than a running-session check needs.
+								const clineTaskSessionService = clineTaskSessionServiceByWorkspaceId.get(taskScope.workspaceId);
+								return clineTaskSessionService?.getSummary(taskId)?.state === "running";
+							},
+							warn: deps.warn,
+						},
+						{
+							workspaceScope,
+							...input,
+						},
+					),
+				warn: deps.warn,
 			}),
 			projectsApi: createProjectsApi({
 				getActiveWorkspacePath: deps.workspaceRegistry.getActiveWorkspacePath,

@@ -24,6 +24,7 @@ import {
 	updateTask,
 } from "../core/task-board-mutations";
 import { resolveProjectInputPath } from "../projects/project-path";
+import { type SkippedReadyDependentTask, startReadyDependentTasks } from "../server/linked-task-autostart";
 import { loadWorkspaceContext, mutateWorkspaceState } from "../state/workspace-state";
 import type { RuntimeAppRouter } from "../trpc/app-router";
 
@@ -765,6 +766,7 @@ interface TrashTaskExecutionResult {
 	previousColumnId: ListTaskColumn;
 	readyTaskIds: string[];
 	autoStartedTasks: JsonRecord[];
+	skippedAutoStartTasks: SkippedReadyDependentTask[];
 	worktreeDeleted: boolean;
 	worktreeDeleteError?: string;
 	alreadyInTrash: boolean;
@@ -773,7 +775,6 @@ interface TrashTaskExecutionResult {
 interface TrashTaskMutationValue {
 	task: JsonRecord;
 	previousColumnId: ListTaskColumn;
-	readyTaskIds: string[];
 	alreadyInTrash: boolean;
 }
 
@@ -782,13 +783,17 @@ function columnCanHaveLiveTaskSession(columnId: ListTaskColumn): boolean {
 }
 
 async function trashTaskById(input: {
-	cwd: string;
 	taskId: string;
-	projectPath?: string;
+	workspaceId: string;
 	workspaceRepoPath: string;
 	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>;
 }): Promise<TrashTaskExecutionResult> {
+	// Captured inside the mutation so the shared auto-start service can diff the
+	// board before and after this save (the persisted state is already advanced
+	// by the time `mutateWorkspaceState` returns).
+	let previousBoard: RuntimeWorkspaceStateResponse["board"] | null = null;
 	const mutation = await mutateWorkspaceState<TrashTaskMutationValue>(input.workspaceRepoPath, (latestState) => {
+		previousBoard = latestState.board;
 		const latestRecord = findTaskRecord(latestState, input.taskId);
 		if (!latestRecord) {
 			throw new Error(`Task "${input.taskId}" was not found in workspace ${input.workspaceRepoPath}.`);
@@ -799,7 +804,6 @@ async function trashTaskById(input: {
 				value: {
 					task: formatTaskRecord(latestState, latestRecord.task, latestRecord.columnId),
 					previousColumnId: latestRecord.columnId,
-					readyTaskIds: [] as string[],
 					alreadyInTrash: true,
 				},
 				save: false,
@@ -820,7 +824,6 @@ async function trashTaskById(input: {
 			value: {
 				task: formatTaskRecord(nextState, trashed.task, "trash"),
 				previousColumnId: latestRecord.columnId,
-				readyTaskIds: trashed.readyTaskIds,
 				alreadyInTrash: false,
 			},
 		};
@@ -837,6 +840,7 @@ async function trashTaskById(input: {
 			previousColumnId: mutation.value.previousColumnId,
 			readyTaskIds: [],
 			autoStartedTasks: [],
+			skippedAutoStartTasks: [],
 			worktreeDeleted: false,
 			alreadyInTrash: true,
 		};
@@ -846,14 +850,67 @@ async function trashTaskById(input: {
 		await stopTaskRuntimeSession(input.runtimeClient, input.taskId);
 	}
 
-	const autoStartedTasks: JsonRecord[] = [];
-	for (const readyTaskId of mutation.value.readyTaskIds) {
-		const started = await startTask({
-			cwd: input.cwd,
-			taskId: readyTaskId,
-			projectPath: input.projectPath,
-		});
-		autoStartedTasks.push(started);
+	// Shared with the runtime `saveState` handler; the CLI only supplies a
+	// runtime-backed session starter because sessions live in the server process.
+	const autoStart = await startReadyDependentTasks(
+		{
+			startTaskSession: async (workspaceScope, request) => {
+				const ensured = await input.runtimeClient.workspace.ensureWorktree.mutate({
+					taskId: request.taskId,
+					baseRef: request.baseRef,
+				});
+				if (!ensured.ok) {
+					return {
+						ok: false,
+						summary: null,
+						error: ensured.error ?? "Could not ensure task worktree.",
+					};
+				}
+				return await input.runtimeClient.runtime.startTaskSession.mutate({
+					taskId: request.taskId,
+					prompt: request.prompt,
+					taskTitle: request.taskTitle,
+					startInPlanMode: request.startInPlanMode,
+					baseRef: request.baseRef,
+					agentId: request.agentId,
+					clineSettings: request.clineSettings,
+				});
+			},
+			isTaskSessionRunning: (_workspaceScope, taskId) => mutation.state.sessions[taskId]?.state === "running",
+			warn: (message) => {
+				process.stderr.write(`[kanban] ${message}\n`);
+			},
+		},
+		{
+			workspaceScope: {
+				workspaceId: input.workspaceId,
+				workspacePath: input.workspaceRepoPath,
+			},
+			previousBoard: previousBoard ?? mutation.state.board,
+			nextBoard: mutation.state.board,
+			sessions: mutation.state.sessions,
+		},
+	);
+
+	const autoStartedTasks: JsonRecord[] = autoStart.started.map((started) => {
+		const record = findTaskRecord(mutation.state, started.taskId);
+		return {
+			ok: started.ok,
+			task: {
+				id: started.taskId,
+				prompt: record?.task.prompt ?? "",
+				column: "in_progress",
+				workspacePath: input.workspaceRepoPath,
+			},
+			...(started.error ? { error: started.error } : {}),
+		};
+	});
+	for (const skipped of autoStart.skipped) {
+		process.stderr.write(`[kanban] Skipped linked-task auto-start. ${skipped.message}\n`);
+	}
+	if (autoStartedTasks.some((task) => task.ok === true)) {
+		// The dependent cards moved to in_progress after the first notify.
+		await notifyRuntimeWorkspaceStateUpdated(input.runtimeClient);
 	}
 
 	const deletedWorkspace = await deleteTaskWorkspace(input.runtimeClient, input.taskId);
@@ -862,8 +919,9 @@ async function trashTaskById(input: {
 		task: mutation.value.task,
 		taskId: input.taskId,
 		previousColumnId: mutation.value.previousColumnId,
-		readyTaskIds: mutation.value.readyTaskIds,
+		readyTaskIds: autoStart.readyTaskIds,
 		autoStartedTasks,
+		skippedAutoStartTasks: autoStart.skipped,
 		worktreeDeleted: deletedWorkspace.removed,
 		worktreeDeleteError: deletedWorkspace.error,
 		alreadyInTrash: false,
@@ -883,9 +941,8 @@ async function trashTask(input: {
 
 	if (target.kind === "task") {
 		const trashed = await trashTaskById({
-			cwd: input.cwd,
 			taskId: target.taskId,
-			projectPath: input.projectPath,
+			workspaceId,
 			workspaceRepoPath,
 			runtimeClient,
 		});
@@ -897,6 +954,7 @@ async function trashTask(input: {
 				workspacePath: workspaceRepoPath,
 				readyTaskIds: [],
 				autoStartedTasks: [],
+				skippedAutoStartTasks: [],
 			};
 		}
 		return {
@@ -905,6 +963,7 @@ async function trashTask(input: {
 			workspacePath: workspaceRepoPath,
 			readyTaskIds: trashed.readyTaskIds,
 			autoStartedTasks: trashed.autoStartedTasks,
+			skippedAutoStartTasks: trashed.skippedAutoStartTasks,
 			worktreeDeleted: trashed.worktreeDeleted,
 			worktreeDeleteError: trashed.worktreeDeleteError,
 		};
@@ -921,6 +980,7 @@ async function trashTask(input: {
 			alreadyTrashedTasks: [],
 			readyTaskIds: [],
 			autoStartedTasks: [],
+			skippedAutoStartTasks: [],
 			worktreeCleanup: [],
 			count: 0,
 		};
@@ -930,9 +990,8 @@ async function trashTask(input: {
 	for (const { task } of targetTasks) {
 		results.push(
 			await trashTaskById({
-				cwd: input.cwd,
 				taskId: task.id,
-				projectPath: input.projectPath,
+				workspaceId,
 				workspaceRepoPath,
 				runtimeClient,
 			}),
@@ -950,6 +1009,7 @@ async function trashTask(input: {
 		alreadyTrashedTasks: alreadyTrashedTasks.map((result) => result.task),
 		readyTaskIds: [...new Set(trashedTasks.flatMap((result) => result.readyTaskIds))],
 		autoStartedTasks: trashedTasks.flatMap((result) => result.autoStartedTasks),
+		skippedAutoStartTasks: trashedTasks.flatMap((result) => result.skippedAutoStartTasks),
 		worktreeCleanup: trashedTasks.map((result) => ({
 			taskId: result.taskId,
 			removed: result.worktreeDeleted,

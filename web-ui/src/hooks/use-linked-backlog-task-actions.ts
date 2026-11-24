@@ -6,11 +6,10 @@ import { getDetailTerminalTaskId } from "@/hooks/use-terminal-panels";
 import {
 	addTaskDependency,
 	findCardSelection,
-	moveTaskToColumn,
 	removeTaskDependency,
 	trashTaskAndGetReadyLinkedTaskIds,
 } from "@/state/board-state";
-import { trackTaskDependencyCreated, trackTasksAutoStartedFromDependency } from "@/telemetry/events";
+import { trackTaskDependencyCreated } from "@/telemetry/events";
 import type { BoardCard, BoardColumnId, BoardData } from "@/types";
 import { getNextDetailTaskIdAfterTrashMove } from "@/utils/detail-view-task-order";
 
@@ -26,9 +25,6 @@ export function useLinkedBacklogTaskActions({
 	stopTaskSession,
 	cleanupTaskWorkspace,
 	maybeRequestNotificationPermissionForTaskStart,
-	kickoffTaskInProgress,
-	startBacklogTaskWithAnimation,
-	waitForBacklogStartAnimationAvailability,
 }: {
 	board: BoardData;
 	setBoard: Dispatch<SetStateAction<BoardData>>;
@@ -36,14 +32,6 @@ export function useLinkedBacklogTaskActions({
 	stopTaskSession: (taskId: string) => Promise<void>;
 	cleanupTaskWorkspace: (taskId: string) => Promise<unknown>;
 	maybeRequestNotificationPermissionForTaskStart: () => void;
-	kickoffTaskInProgress: (
-		task: BoardCard,
-		taskId: string,
-		fromColumnId: BoardColumnId,
-		options?: { optimisticMove?: boolean },
-	) => Promise<boolean>;
-	startBacklogTaskWithAnimation?: (task: BoardCard) => Promise<boolean>;
-	waitForBacklogStartAnimationAvailability?: () => Promise<void>;
 }): {
 	handleCreateDependency: (fromTaskId: string, toTaskId: string) => void;
 	handleDeleteDependency: (dependencyId: string) => void;
@@ -122,48 +110,15 @@ export function useLinkedBacklogTaskActions({
 					: currentSelectedTaskId,
 			);
 
-			const readyTasks = trashed.readyTaskIds
-				.map((readyTaskId) => findCardSelection(trashed.board, readyTaskId)?.card ?? null)
-				.filter((readyTask): readyTask is BoardCard => readyTask !== null);
-
-			if (readyTasks.length > 0) {
+			// Linked dependents are started by the runtime after this board is
+			// persisted: `workspace.saveState` diffs the previous board against the
+			// saved one and starts backlog tasks that a review -> Done move unblocked.
+			// Do not start them here, and never move them to in_progress before the
+			// save lands - the server only sees the transition while they are still
+			// in backlog, and a client-side start would race the server into a
+			// duplicate session.
+			if (trashed.readyTaskIds.length > 0) {
 				maybeRequestNotificationPermissionForTaskStart();
-				let startedTaskCount = 0;
-				if (startBacklogTaskWithAnimation) {
-					const startedTaskPromises: Promise<boolean>[] = [];
-					for (const [index, readyTask] of readyTasks.entries()) {
-						startedTaskPromises.push(startBacklogTaskWithAnimation(readyTask));
-						if (index < readyTasks.length - 1) {
-							await waitForBacklogStartAnimationAvailability?.();
-						}
-					}
-					const startedTasks = await Promise.all(startedTaskPromises);
-					startedTaskCount = startedTasks.filter(Boolean).length;
-				} else {
-					setBoard((currentBoardState) => {
-						let nextBoardState = currentBoardState;
-						for (const readyTask of readyTasks) {
-							const moved = moveTaskToColumn(nextBoardState, readyTask.id, "in_progress", {
-								insertAtTop: true,
-							});
-							if (moved.moved) {
-								nextBoardState = moved.board;
-							}
-						}
-						return nextBoardState;
-					});
-					for (const readyTask of readyTasks) {
-						const started = await kickoffTaskInProgress(readyTask, readyTask.id, "backlog", {
-							optimisticMove: true,
-						});
-						if (started) {
-							startedTaskCount += 1;
-						}
-					}
-				}
-				if (startedTaskCount > 0) {
-					trackTasksAutoStartedFromDependency(startedTaskCount);
-				}
 			}
 
 			await Promise.all([stopTaskSession(task.id), stopTaskSession(getDetailTerminalTaskId(task.id))]);
@@ -171,13 +126,10 @@ export function useLinkedBacklogTaskActions({
 		},
 		[
 			cleanupTaskWorkspace,
-			kickoffTaskInProgress,
 			maybeRequestNotificationPermissionForTaskStart,
 			setBoard,
 			setSelectedTaskId,
-			startBacklogTaskWithAnimation,
 			stopTaskSession,
-			waitForBacklogStartAnimationAvailability,
 		],
 	);
 

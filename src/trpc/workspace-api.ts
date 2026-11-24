@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import type { ClineTaskSessionService } from "../cline-sdk/cline-task-session-service";
 import type {
+	RuntimeBoardData,
 	RuntimeGitCheckoutResponse,
 	RuntimeGitDiscardResponse,
 	RuntimeGitSummaryResponse,
@@ -16,7 +17,8 @@ import {
 	parseWorktreeDeleteRequest,
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation";
-import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
+import type { StartReadyDependentTasksInput, StartReadyDependentTasksResult } from "../server/linked-task-autostart";
+import { loadWorkspaceBoardById, saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import {
 	createEmptyWorkspaceChangesResponse,
@@ -33,7 +35,7 @@ import {
 	getTaskWorkspaceInfo,
 	resolveTaskCwd,
 } from "../workspace/task-worktree";
-import type { RuntimeTrpcContext } from "./app-router";
+import type { RuntimeTrpcContext, RuntimeTrpcWorkspaceScope } from "./app-router";
 
 export interface CreateWorkspaceApiDependencies {
 	ensureTerminalManagerForWorkspace: (workspaceId: string, repoPath: string) => Promise<TerminalSessionManager>;
@@ -44,6 +46,16 @@ export interface CreateWorkspaceApiDependencies {
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void> | void;
 	broadcastRuntimeProjectsUpdated: (preferredCurrentProjectId: string | null) => Promise<void> | void;
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
+	/**
+	 * Drives linked-task auto-start after a successful save. Wired in
+	 * `runtime-server.ts` to `startReadyDependentTasks` with the shared
+	 * `startWorkspaceTaskSession` starter, so native Cline and PTY agents both work.
+	 */
+	autoStartReadyDependentTasks?: (
+		workspaceScope: { workspaceId: string; workspacePath: string },
+		input: Omit<StartReadyDependentTasksInput, "workspaceScope">,
+	) => Promise<StartReadyDependentTasksResult>;
+	warn?: (message: string) => void;
 }
 
 function normalizeOptionalTaskWorkspaceScopeInput(
@@ -197,6 +209,37 @@ function isMissingTaskWorktreeError(error: unknown): boolean {
 }
 
 export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): RuntimeTrpcContext["workspaceApi"] {
+	const autoStartReadyDependentTasksAfterSave = async (
+		workspaceScope: RuntimeTrpcWorkspaceScope,
+		previousBoard: RuntimeBoardData,
+		response: RuntimeWorkspaceStateResponse,
+	): Promise<RuntimeWorkspaceStateResponse | null> => {
+		if (!deps.autoStartReadyDependentTasks) {
+			return null;
+		}
+		try {
+			const result = await deps.autoStartReadyDependentTasks(workspaceScope, {
+				previousBoard,
+				nextBoard: response.board,
+				sessions: response.sessions,
+			});
+			for (const skipped of result.skipped) {
+				deps.warn?.(`Skipped linked-task auto-start. ${skipped.message}`);
+			}
+			if (result.started.some((task) => task.ok)) {
+				// The start path moves each task to in_progress in the persisted board,
+				// so clients need a fresh snapshot to see the new card position.
+				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
+				void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
+			}
+			return result.finalState ?? null;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			deps.warn?.(`Linked-task auto-start failed. ${message}`);
+			return null;
+		}
+	};
+
 	return {
 		loadGitSummary: async (workspaceScope, input) => {
 			try {
@@ -369,10 +412,21 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 				for (const summary of terminalManager.listSummaries()) {
 					input.sessions[summary.taskId] = summary;
 				}
+				// Cheap read (one file + parse, no git, no lock) so the linked-task
+				// diff can see the board as it was before this save.
+				const previousBoard = await loadWorkspaceBoardById(workspaceScope.workspaceId);
 				const response = await saveWorkspaceState(workspaceScope.workspacePath, input);
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
 				void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
-				return response;
+				const autoStartedState = await autoStartReadyDependentTasksAfterSave(
+					workspaceScope,
+					previousBoard,
+					response,
+				);
+				// Auto-start writes bump the revision after `saveWorkspaceState`, so
+				// return the latest state when anything started. Otherwise the client
+				// would store a stale expectedRevision.
+				return autoStartedState ?? response;
 			} catch (error) {
 				if (error instanceof WorkspaceStateConflictError) {
 					throw new TRPCError({

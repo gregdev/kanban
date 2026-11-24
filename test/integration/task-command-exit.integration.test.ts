@@ -7,6 +7,8 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { moveTaskToColumn } from "../../src/core/task-board-mutations";
+import { mutateWorkspaceState } from "../../src/state/workspace-state";
 import { createGitTestEnv } from "../utilities/git-env";
 import { createTempDir } from "../utilities/temp-dir";
 
@@ -548,6 +550,145 @@ describe("source task commands", () => {
 				).toBe(true);
 				expect(listedTrash.exitCode).toBe(0);
 				expect(listedTrash.stdout).toContain('"count": 0');
+			} finally {
+				await requestGracefulShutdown(serverProcess);
+				const stopped = await waitForExit(serverProcess, 5_000);
+				if (!stopped) {
+					serverProcess.kill("SIGKILL");
+					await waitForExit(serverProcess, 5_000);
+				}
+			}
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("reports autoStartedTasks when task done unblocks a linked backlog task", { timeout: 90_000 }, async () => {
+		const { path: homeDir, cleanup: cleanupHome } = createTempDir("kanban-home-linked-done-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-linked-done-");
+
+		try {
+			initGitRepository(projectPath);
+			writeFileSync(join(projectPath, "README.md"), "# Linked Done Test\n", "utf8");
+			commitAll(projectPath, "init");
+
+			const port = String(await getAvailablePort());
+			const env = createGitTestEnv({
+				HOME: homeDir,
+				USERPROFILE: homeDir,
+				KANBAN_RUNTIME_PORT: port,
+			});
+
+			const serverProcess = spawn(
+				process.execPath,
+				[
+					"--require",
+					resolveShutdownIpcHookPath(),
+					"--import",
+					resolveTsxLoaderImportSpecifier(),
+					resolve(process.cwd(), "src/cli.ts"),
+					"--no-open",
+				],
+				{
+					cwd: projectPath,
+					env,
+					stdio: ["ignore", "pipe", "pipe", "ipc"],
+				},
+			);
+
+			try {
+				await waitForServerStart(serverProcess);
+
+				const taskIds: string[] = [];
+				for (const prompt of ["Linked prerequisite task", "Linked dependent task"]) {
+					const created = await runCliCommandAndCollectOutput({
+						args: ["task", "create", "--prompt", prompt, "--project-path", projectPath],
+						cwd: projectPath,
+						env,
+					});
+					expect(
+						created.didExit,
+						`task create did not exit in time.\nstdout:\n${created.stdout}\nstderr:\n${created.stderr}`,
+					).toBe(true);
+					expect(created.exitCode).toBe(0);
+					const createdPayload = JSON.parse(created.stdout) as { task?: { id?: string } };
+					expect(typeof createdPayload.task?.id).toBe("string");
+					if (createdPayload.task?.id) {
+						taskIds.push(createdPayload.task.id);
+					}
+				}
+				const [dependentTaskId, prerequisiteTaskId] = taskIds;
+				if (!dependentTaskId || !prerequisiteTaskId) {
+					throw new Error("Expected both linked task ids to be created.");
+				}
+
+				const linked = await runCliCommandAndCollectOutput({
+					args: [
+						"task",
+						"link",
+						"--task-id",
+						dependentTaskId,
+						"--linked-task-id",
+						prerequisiteTaskId,
+						"--project-path",
+						projectPath,
+					],
+					cwd: projectPath,
+					env,
+				});
+				expect(
+					linked.didExit,
+					`task link did not exit in time.\nstdout:\n${linked.stdout}\nstderr:\n${linked.stderr}`,
+				).toBe(true);
+				expect(linked.exitCode).toBe(0);
+
+				// There is no CLI command to move a task into review, so seed the
+				// prerequisite there through the same workspace state store the runtime uses.
+				const previousHome = process.env.HOME;
+				const previousUserProfile = process.env.USERPROFILE;
+				process.env.HOME = homeDir;
+				process.env.USERPROFILE = homeDir;
+				try {
+					const mutation = await mutateWorkspaceState(projectPath, (state) => {
+						const moved = moveTaskToColumn(state.board, prerequisiteTaskId, "review");
+						return {
+							board: moved.board,
+							value: moved.moved,
+						};
+					});
+					expect(mutation.value).toBe(true);
+				} finally {
+					if (previousHome === undefined) {
+						delete process.env.HOME;
+					} else {
+						process.env.HOME = previousHome;
+					}
+					if (previousUserProfile === undefined) {
+						delete process.env.USERPROFILE;
+					} else {
+						process.env.USERPROFILE = previousUserProfile;
+					}
+				}
+
+				const done = await runCliCommandAndCollectOutput({
+					args: ["task", "done", "--task-id", prerequisiteTaskId, "--project-path", projectPath],
+					cwd: projectPath,
+					env,
+				});
+				expect(
+					done.didExit,
+					`task done did not exit in time.\nstdout:\n${done.stdout}\nstderr:\n${done.stderr}`,
+				).toBe(true);
+				expect(done.exitCode).toBe(0);
+
+				const payload = JSON.parse(done.stdout) as {
+					readyTaskIds?: string[];
+					autoStartedTasks?: Array<{ task?: { id?: string } }>;
+				};
+				expect(payload.readyTaskIds).toContain(dependentTaskId);
+				expect(payload.autoStartedTasks).toHaveLength(1);
+				expect(payload.autoStartedTasks?.[0]?.task?.id).toBe(dependentTaskId);
 			} finally {
 				await requestGracefulShutdown(serverProcess);
 				const stopped = await waitForExit(serverProcess, 5_000);

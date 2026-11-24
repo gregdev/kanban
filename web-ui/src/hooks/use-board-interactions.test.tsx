@@ -188,8 +188,8 @@ describe("useBoardInteractions", () => {
 		}
 	});
 
-	it("starts dependency-unblocked tasks even when setBoard updater is deferred", async () => {
-		let startBacklogTaskWithAnimation: ((task: BoardCard) => Promise<boolean>) | null = null;
+	it("starts a backlog task even when the setBoard updater is deferred", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
 
 		useProgrammaticCardMovesMock.mockReturnValue({
 			handleProgrammaticCardMoveReady: () => {},
@@ -203,17 +203,12 @@ describe("useBoardInteractions", () => {
 			programmaticCardMoveCycle: 0,
 		});
 
-		useLinkedBacklogTaskActionsMock.mockImplementation(
-			(input: { startBacklogTaskWithAnimation?: (task: BoardCard) => Promise<boolean> }) => {
-				startBacklogTaskWithAnimation = input.startBacklogTaskWithAnimation ?? null;
-				return {
-					handleCreateDependency: () => {},
-					handleDeleteDependency: () => {},
-					confirmMoveTaskToTrash: async () => {},
-					requestMoveTaskToTrash: async () => {},
-				};
-			},
-		);
+		useLinkedBacklogTaskActionsMock.mockReturnValue({
+			handleCreateDependency: () => {},
+			handleDeleteDependency: () => {},
+			confirmMoveTaskToTrash: async () => {},
+			requestMoveTaskToTrash: async () => {},
+		});
 
 		const board = createBoard();
 		const setBoard = vi.fn<Dispatch<SetStateAction<BoardData>>>((_nextBoard) => {
@@ -237,25 +232,29 @@ describe("useBoardInteractions", () => {
 					setBoard={setBoard}
 					ensureTaskWorkspace={ensureTaskWorkspace}
 					startTaskSession={startTaskSession}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
 				/>,
 			);
 		});
 
-		if (!startBacklogTaskWithAnimation) {
-			throw new Error("Expected startBacklogTaskWithAnimation to be provided.");
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
 		}
-
+		const initialSnapshot = latestSnapshot as HookSnapshot;
 		const backlogTask = board.columns[0]?.cards[0];
 		if (!backlogTask) {
 			throw new Error("Expected a backlog task.");
 		}
 
-		let started = false;
 		await act(async () => {
-			started = await startBacklogTaskWithAnimation!(backlogTask);
+			initialSnapshot.handleStartTask("task-1");
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
 		});
 
-		expect(started).toBe(true);
 		expect(ensureTaskWorkspace).toHaveBeenCalledWith(backlogTask);
 		expect(startTaskSession).toHaveBeenCalledWith(backlogTask);
 	});
