@@ -21,6 +21,9 @@ export enum LocalStorageKey {
 	TabVisibilityPresence = "kanban.tab-visibility-presence.v1",
 	Theme = "kanban.theme",
 	TextDrafts = "kanban.text-drafts.v1",
+	TerminalFontSize = "kanban.terminal-font-size",
+	TerminalLineHeight = "kanban.terminal-line-height",
+	TerminalLetterSpacing = "kanban.terminal-letter-spacing",
 }
 
 export const LAYOUT_CUSTOMIZATION_LOCAL_STORAGE_KEYS = [

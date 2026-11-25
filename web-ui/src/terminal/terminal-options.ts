@@ -1,12 +1,14 @@
 import type { ITerminalOptions } from "@xterm/xterm";
 
 import type { ThemeTerminalColors } from "@/hooks/use-theme";
+import { DEFAULT_TERMINAL_TYPOGRAPHY, type TerminalTypography } from "@/terminal/terminal-typography";
 
 interface CreateKanbanTerminalOptionsInput {
 	cursorColor: string;
 	isMacPlatform: boolean;
 	terminalBackgroundColor: string;
 	themeColors: ThemeTerminalColors;
+	typography?: TerminalTypography;
 }
 
 const TERMINAL_WORD_SEPARATOR = " ()[]{}',\"`";
@@ -18,6 +20,7 @@ export function createKanbanTerminalOptions({
 	isMacPlatform,
 	terminalBackgroundColor,
 	themeColors,
+	typography = DEFAULT_TERMINAL_TYPOGRAPHY,
 }: CreateKanbanTerminalOptionsInput): ITerminalOptions {
 	return {
 		allowProposedApi: true,
@@ -28,11 +31,11 @@ export function createKanbanTerminalOptions({
 		cursorStyle: "block",
 		disableStdin: false,
 		fontFamily: TERMINAL_FONT_FAMILY,
-		fontSize: 13,
+		fontSize: typography.fontSize,
 		fontWeight: "normal",
 		fontWeightBold: "bold",
-		letterSpacing: 0,
-		lineHeight: 1,
+		letterSpacing: typography.letterSpacing,
+		lineHeight: typography.lineHeight,
 		macOptionClickForcesSelection: isMacPlatform,
 		macOptionIsMeta: isMacPlatform,
 		rightClickSelectsWord: false,

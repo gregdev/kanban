@@ -4,12 +4,25 @@ import {
 	disposeAllPersistentTerminalsForWorkspace,
 	ensurePersistentTerminal,
 } from "@/terminal/persistent-terminal-manager";
+import {
+	resetTerminalTypography,
+	setTerminalFontSize,
+	setTerminalLetterSpacing,
+	setTerminalLineHeight,
+} from "@/terminal/terminal-typography";
+
+type TerminalOptionsSnapshot = {
+	fontSize?: number;
+	letterSpacing?: number;
+	lineHeight?: number;
+	theme: Record<string, unknown>;
+};
 
 const xtermMock = vi.hoisted(() => ({
 	instances: [] as Array<{
 		cols: number;
 		rows: number;
-		options: { theme: Record<string, unknown> };
+		options: { fontSize?: number; letterSpacing?: number; lineHeight?: number; theme: Record<string, unknown> };
 		unicode: { activeVersion: string };
 		loadAddon: ReturnType<typeof vi.fn>;
 		open: ReturnType<typeof vi.fn>;
@@ -27,6 +40,7 @@ const xtermMock = vi.hoisted(() => ({
 		hasSelection: ReturnType<typeof vi.fn>;
 		getSelection: ReturnType<typeof vi.fn>;
 	}>,
+	fitCount: 0,
 	resetCount: 0,
 	writes: [] as string[],
 }));
@@ -35,7 +49,7 @@ vi.mock("@xterm/xterm", () => {
 	class Terminal {
 		cols = 80;
 		rows = 24;
-		options: { theme: Record<string, unknown> } = { theme: {} };
+		options: { fontSize?: number; letterSpacing?: number; lineHeight?: number; theme: Record<string, unknown> };
 		unicode = { activeVersion: "" };
 		loadAddon = vi.fn();
 		open = vi.fn();
@@ -58,7 +72,13 @@ vi.mock("@xterm/xterm", () => {
 		hasSelection = vi.fn(() => false);
 		getSelection = vi.fn(() => "");
 
-		constructor() {
+		constructor(options: Partial<TerminalOptionsSnapshot> = {}) {
+			this.options = {
+				fontSize: options.fontSize,
+				letterSpacing: options.letterSpacing,
+				lineHeight: options.lineHeight,
+				theme: options.theme ?? {},
+			};
 			xtermMock.instances.push(this);
 		}
 	}
@@ -69,7 +89,9 @@ vi.mock("@xterm/xterm", () => {
 vi.mock("@xterm/addon-clipboard", () => ({ ClipboardAddon: class {} }));
 vi.mock("@xterm/addon-fit", () => ({
 	FitAddon: class {
-		fit() {}
+		fit() {
+			xtermMock.fitCount += 1;
+		}
 	},
 }));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
@@ -251,8 +273,11 @@ describe("persistent terminal reconnect", () => {
 	beforeEach(() => {
 		FakeWebSocket.instances = [];
 		xtermMock.instances.length = 0;
+		xtermMock.fitCount = 0;
 		xtermMock.resetCount = 0;
 		xtermMock.writes.length = 0;
+		localStorage.clear();
+		resetTerminalTypography();
 		vi.useFakeTimers();
 		vi.stubGlobal("WebSocket", FakeWebSocket);
 		vi.stubGlobal("ResizeObserver", FakeResizeObserver);
@@ -469,5 +494,52 @@ describe("persistent terminal reconnect", () => {
 		window.dispatchEvent(new Event("online"));
 		expect(getSockets().io).toHaveLength(1);
 		container.remove();
+	});
+
+	it("creates terminals with the persisted typography", async () => {
+		setTerminalFontSize(17);
+		setTerminalLineHeight(1.2);
+		setTerminalLetterSpacing(0.5);
+
+		await establishReadyConnection();
+
+		const terminal = xtermMock.instances.at(-1);
+		expect(terminal?.options.fontSize).toBe(17);
+		expect(terminal?.options.lineHeight).toBe(1.2);
+		expect(terminal?.options.letterSpacing).toBe(0.5);
+	});
+
+	it("applies a live typography change in place and re-fits the PTY", async () => {
+		const harness = await establishReadyConnection();
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		harness.terminal.mount(container, APPEARANCE, { isVisible: false });
+
+		const terminal = xtermMock.instances.at(-1);
+		expect(terminal?.options.fontSize).toBe(13);
+
+		const control = getLatestPair().control;
+		control.sent.length = 0;
+		const fitCountBeforeChange = xtermMock.fitCount;
+
+		setTerminalFontSize(18);
+
+		expect(terminal?.options.fontSize).toBe(18);
+		expect(xtermMock.fitCount).toBe(fitCountBeforeChange + 1);
+		const sentMessages = control.sent.map((message) => JSON.parse(String(message)) as { type: string });
+		expect(sentMessages).toContainEqual(expect.objectContaining({ type: "resize" }));
+		// The terminal is updated in place: nothing is recreated or remounted.
+		expect(xtermMock.instances).toHaveLength(1);
+		container.remove();
+	});
+
+	it("stops following typography changes after dispose", async () => {
+		const harness = await establishReadyConnection();
+		const terminal = xtermMock.instances.at(-1);
+
+		harness.terminal.dispose();
+		setTerminalFontSize(20);
+
+		expect(terminal?.options.fontSize).toBe(13);
 	});
 });

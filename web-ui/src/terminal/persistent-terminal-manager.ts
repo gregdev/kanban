@@ -15,6 +15,11 @@ import type {
 import { clearTerminalGeometry, reportTerminalGeometry } from "@/terminal/terminal-geometry-registry";
 import { createKanbanTerminalOptions } from "@/terminal/terminal-options";
 import {
+	getTerminalTypography,
+	subscribeTerminalTypography,
+	type TerminalTypography,
+} from "@/terminal/terminal-typography";
+import {
 	appendTerminalHeuristicText,
 	hasInterruptAcknowledgement,
 	hasLikelyShellPrompt,
@@ -172,6 +177,7 @@ class PersistentTerminal {
 	private readonly subscribers = new Set<PersistentTerminalSubscriber>();
 	private readonly parkingRoot: HTMLDivElement;
 	private readonly unicode11Addon = new Unicode11Addon();
+	private readonly unsubscribeTypography: () => void;
 	// This identifies one browser viewer, not the PTY session itself.
 	// The server uses it to keep per-tab restore and socket state while all tabs
 	// still share the same taskId backed PTY.
@@ -227,6 +233,7 @@ class PersistentTerminal {
 				isMacPlatform,
 				terminalBackgroundColor: this.appearance.terminalBackgroundColor,
 				themeColors: this.appearance.themeColors ?? getTerminalThemeColors(),
+				typography: getTerminalTypography(),
 			}),
 			cols: initialGeometry.cols,
 			rows: initialGeometry.rows,
@@ -237,6 +244,12 @@ class PersistentTerminal {
 		this.terminal.loadAddon(this.unicode11Addon);
 		this.terminal.unicode.activeVersion = "11";
 		this.terminal.open(this.hostElement);
+		// Typography is a per-browser preference, so it lives in a small store
+		// instead of the per-terminal appearance payload. Subscribing here keeps
+		// every live terminal (task + home shell) in step without remounting them.
+		this.unsubscribeTypography = subscribeTerminalTypography((typography) => {
+			this.applyTypography(typography);
+		});
 		this.terminal.onData((data) => {
 			this.sendIoData(data);
 		});
@@ -676,6 +689,27 @@ class PersistentTerminal {
 		this.connectSockets();
 	}
 
+	/**
+	 * Apply a typography change in place. xterm measures its cell size from its
+	 * own options, so the PTY has to be told the new cols/rows: mutate the
+	 * options, then reuse the mounted-viewport resize path (fit + control
+	 * `resize`). A parked terminal re-fits when it is next mounted.
+	 */
+	private applyTypography(typography: TerminalTypography): void {
+		const { fontSize, letterSpacing, lineHeight } = this.terminal.options;
+		if (
+			fontSize === typography.fontSize &&
+			letterSpacing === typography.letterSpacing &&
+			lineHeight === typography.lineHeight
+		) {
+			return;
+		}
+		this.terminal.options.fontSize = typography.fontSize;
+		this.terminal.options.lineHeight = typography.lineHeight;
+		this.terminal.options.letterSpacing = typography.letterSpacing;
+		this.requestResize();
+	}
+
 	private updateAppearance(appearance: PersistentTerminalAppearance): void {
 		this.appearance = appearance;
 		this.terminal.options.theme = {
@@ -874,6 +908,7 @@ class PersistentTerminal {
 			return;
 		}
 		this.disposed = true;
+		this.unsubscribeTypography();
 		window.removeEventListener("online", this.handleWindowOnline);
 		window.removeEventListener("pageshow", this.handleWindowPageShow);
 		document.removeEventListener("visibilitychange", this.handleDocumentVisibilityChange);

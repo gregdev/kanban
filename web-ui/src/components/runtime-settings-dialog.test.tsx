@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeSettingsDialog } from "@/components/runtime-settings-dialog";
 import type { RuntimeConfigResponse } from "@/runtime/types";
+import { LocalStorageKey } from "@/storage/local-storage-store";
+import { resetTerminalTypography } from "@/terminal/terminal-typography";
 
 /*
  * Radix Select depends on pointer-capture APIs that jsdom lacks.
@@ -229,6 +231,7 @@ describe("RuntimeSettingsDialog", () => {
 		runtimeConfigSaveMock.mockResolvedValue(true);
 		clineSetupSectionOnSavedRef.onSaved = null;
 		window.localStorage.clear();
+		resetTerminalTypography();
 		document.documentElement.removeAttribute("data-theme");
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
@@ -290,6 +293,34 @@ describe("RuntimeSettingsDialog", () => {
 		});
 
 		expect(resetLayoutCustomizationsMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("renders the terminal typography section and applies changes without marking the dialog dirty", async () => {
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={savedClineOauthConfig}
+					onOpenChange={() => {}}
+				/>,
+			);
+		});
+
+		const fontSizeInput = document.querySelector<HTMLInputElement>("#terminal-font-size");
+		expect(fontSizeInput).toBeInstanceOf(HTMLInputElement);
+		expect(fontSizeInput?.value).toBe("13");
+		expect(document.querySelector("#terminal-line-height")).toBeInstanceOf(HTMLInputElement);
+		expect(document.querySelector("#terminal-letter-spacing")).toBeInstanceOf(HTMLInputElement);
+
+		await act(async () => {
+			setInputValue(fontSizeInput as HTMLInputElement, "16");
+		});
+
+		expect(window.localStorage.getItem(LocalStorageKey.TerminalFontSize)).toBe("16");
+		// Typography is a per-browser view preference, so it is not part of the
+		// runtime config the Save button persists.
+		expect(findButtonByText(document.body, "Save")?.disabled).toBe(true);
 	});
 
 	it("enables save on theme change and reverts preview on cancel", async () => {
