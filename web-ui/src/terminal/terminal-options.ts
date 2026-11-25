@@ -11,7 +11,7 @@ interface CreateKanbanTerminalOptionsInput {
 
 const TERMINAL_WORD_SEPARATOR = " ()[]{}',\"`";
 const TERMINAL_FONT_FAMILY =
-	"'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace";
+	"'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Monaco, 'Courier New', monospace";
 
 export function createKanbanTerminalOptions({
 	cursorColor,

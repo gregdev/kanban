@@ -43,7 +43,7 @@
   --font-sans:
     "Geist", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    "Cascadia Code", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* Border radius */
   --radius-sm: 4px;
