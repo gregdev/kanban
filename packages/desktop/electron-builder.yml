@@ -60,3 +60,31 @@ mac:
 
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"
+
+# Windows builds must run on Windows: node-pty compiles against the Electron
+# ABI at install time (`electron-builder install-app-deps` in postinstall), so a
+# cross-build from Linux/WSL (via Wine) embeds the wrong `.node` binaries and
+# ships a terminal that cannot spawn. See packages/desktop/README.md.
+#
+# `icon.png` must be at least 256x256; electron-builder converts it to the
+# `.ico` used for the app, the installer and the uninstaller.
+#
+# Do NOT rename productName/executableName: build/bin/kanban.cmd resolves the
+# bundled CLI runner as `<install root>/Kanban.exe`.
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+# Assisted installer (not one-click) so users can pick the install directory.
+# `perMachine: false` installs per-user, which needs no elevation and matches
+# the unsigned, no-auto-update state of these builds.
+nsis:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

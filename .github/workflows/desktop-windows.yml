@@ -1,0 +1,73 @@
+name: Desktop (Windows)
+
+# The Windows installer has to be packaged on Windows: node-pty is rebuilt
+# against the Electron ABI by `electron-builder install-app-deps` during
+# postinstall, so building on Linux/WSL via Wine would ship Linux `.node`
+# binaries and break the terminal. See packages/desktop/README.md.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: desktop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-installer:
+    name: Build NSIS installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      # No Windows code-signing certificate is configured and signing is out of
+      # scope. This disables electron-builder's automatic code-signing identity
+      # discovery so an unsigned installer is what gets produced, even on a
+      # runner that happens to have a certificate installed.
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.21.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Root build produces dist/cli.js + dist/web-ui, which `stage:cli` copies
+      # into the desktop package. Sentry sourcemap upload self-skips without
+      # SENTRY_AUTH_TOKEN.
+      - name: Build runtime and web UI
+        run: pnpm run build
+
+      - name: Build Windows installer
+        run: pnpm --filter @kanban/desktop run build:win
+
+      # The installer alone is not enough to diagnose packaging problems, so the
+      # unpacked app tree is archived alongside it.
+      - name: Zip unpacked app
+        shell: pwsh
+        run: Compress-Archive -Path packages/desktop/out/win-unpacked -DestinationPath packages/desktop/out/kanban-win-unpacked.zip -Force
+
+      - name: Upload installer and unpacked app
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanban-windows-installer
+          path: |
+            packages/desktop/out/*.exe
+            packages/desktop/out/kanban-win-unpacked.zip
+          if-no-files-found: error
+          retention-days: 14
