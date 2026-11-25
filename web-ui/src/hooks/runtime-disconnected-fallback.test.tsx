@@ -36,8 +36,8 @@ describe("RuntimeDisconnectedFallback", () => {
 			root.render(<RuntimeDisconnectedFallback />);
 		});
 
-		expect(container.textContent).toContain("Disconnected from Cline");
-		expect(container.textContent).toContain("Run cline again in your terminal");
+		expect(container.textContent).toContain("Disconnected from Kanban");
+		expect(container.textContent).toContain("Run kanban again in your terminal");
 	});
 
 	it("renders a non-blocking reconnecting banner for the overlay variant", async () => {
@@ -48,6 +48,7 @@ describe("RuntimeDisconnectedFallback", () => {
 		const status = container.querySelector('[role="status"]');
 		expect(status).toBeInstanceOf(HTMLDivElement);
 		expect(status?.className).toContain("pointer-events-none");
+		expect(container.textContent).toContain("Connection to Kanban dropped");
 		expect(container.textContent).toContain("Reconnecting...");
 	});
 });
