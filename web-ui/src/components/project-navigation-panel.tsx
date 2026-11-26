@@ -382,6 +382,22 @@ export function ProjectNavigationPanel({
 	return (
 		<>
 			{keepExpandedFrame ? (
+				// Holds the sidebar's unexpanded footprint in the flex row while the
+				// panel floats above the board, so the columns beside it never
+				// resize during the expand/retract animation. It is completely
+				// covered by the panel, which starts at exactly this width.
+				<div
+					aria-hidden
+					data-testid="kanban-agent-layout-spacer"
+					className="shrink-0 bg-surface-1"
+					style={{
+						width: sidebarWidth,
+						minWidth: sidebarWidth,
+						borderRight: "1px solid var(--color-divider)",
+					}}
+				/>
+			) : null}
+			{keepExpandedFrame ? (
 				// Dim the board behind the expanded agent and let a click/tap dismiss it.
 				// It stays mounted while the panel retracts so the two fades line up, but
 				// stops capturing input the moment the collapse starts. z-[45] keeps it

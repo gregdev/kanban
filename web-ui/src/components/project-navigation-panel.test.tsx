@@ -125,6 +125,11 @@ function getButtonByText(container: HTMLElement, text: string): HTMLButtonElemen
 	return button;
 }
 
+function getLayoutSpacer(container: HTMLElement): HTMLDivElement | null {
+	const spacer = container.querySelector('[data-testid="kanban-agent-layout-spacer"]');
+	return spacer instanceof HTMLDivElement ? spacer : null;
+}
+
 function getButtonByAriaLabel(container: HTMLElement, label: string): HTMLButtonElement {
 	const button = container.querySelector(`[aria-label="${label}"]`);
 	if (!(button instanceof HTMLButtonElement)) {
@@ -301,6 +306,7 @@ describe("ProjectNavigationPanel width persistence", () => {
 		renderPanel({ activeSection: "agent" });
 		const sidebar = getSidebar(container);
 		const initialWidth = sidebar.style.width;
+		expect(getLayoutSpacer(container)).toBeNull();
 
 		const expandButton = container.querySelector('[aria-label="Expand Kanban agent"]') as HTMLButtonElement;
 		act(() => {
@@ -317,6 +323,11 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(sidebar.style.height).toBe("100svh");
 		expect(sidebar.style.transition).toContain("width");
 		expect(container.querySelector('[aria-label="Resize sidebar"]')).toBeNull();
+		// The floating panel must hold the sidebar's unexpanded footprint in the
+		// flex row, otherwise the board columns stretch into the freed space.
+		const spacer = getLayoutSpacer(container);
+		expect(spacer?.style.width).toBe(initialWidth);
+		expect(spacer?.style.minWidth).toBe(initialWidth);
 
 		const collapseButton = container.querySelector('[aria-label="Collapse Kanban agent"]') as HTMLButtonElement;
 		act(() => {
@@ -326,6 +337,8 @@ describe("ProjectNavigationPanel width persistence", () => {
 		// The overlay frame stays mounted while the width transition retracts it.
 		expect(sidebar.classList.contains("fixed")).toBe(true);
 		expect(sidebar.style.width).toBe(initialWidth);
+		// ...and so does the footprint anchor, so the board never moves either way.
+		expect(getLayoutSpacer(container)?.style.width).toBe(initialWidth);
 
 		act(() => {
 			const transitionEnd = new Event("transitionend", { bubbles: true });
@@ -338,6 +351,7 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(sidebar.style.width).toBe(initialWidth);
 		expect(sidebar.style.maxWidth).toBe(`${SIDEBAR_MAX_EXPANDED_WIDTH}px`);
 		expect(container.querySelector('[aria-label="Resize sidebar"]')).not.toBeNull();
+		expect(getLayoutSpacer(container)).toBeNull();
 	});
 
 	it("dims the board behind the expanded agent and collapses it when the backdrop is clicked", () => {
