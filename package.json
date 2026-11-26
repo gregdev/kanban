@@ -38,6 +38,7 @@
 	"files": [
 		"dist",
 		"man",
+		"scripts/guard-worktree-install.mjs",
 		"README.md",
 		"LICENSE"
 	],
@@ -69,6 +70,7 @@
 		"test:integration": "vitest run test/integration",
 		"test:precommit": "pnpm run test:fast",
 		"test:watch": "vitest",
+		"preinstall": "node scripts/guard-worktree-install.mjs",
 		"prepare": "husky",
 		"prepublishOnly": "pnpm run build && pnpm run check"
 	},
