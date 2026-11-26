@@ -340,6 +340,39 @@ describe("ProjectNavigationPanel width persistence", () => {
 		expect(container.querySelector('[aria-label="Resize sidebar"]')).not.toBeNull();
 	});
 
+	it("dims the board behind the expanded agent and collapses it when the backdrop is clicked", () => {
+		renderPanel({ activeSection: "agent" });
+		expect(container.querySelector('[data-testid="kanban-agent-backdrop"]')).toBeNull();
+
+		const expandButton = getButtonByAriaLabel(container, "Expand Kanban agent");
+		act(() => {
+			expandButton.click();
+		});
+
+		const backdrop = container.querySelector('[data-testid="kanban-agent-backdrop"]');
+		expect(backdrop).toBeInstanceOf(HTMLDivElement);
+		expect((backdrop as HTMLDivElement).classList.contains("bg-black/50")).toBe(true);
+		expect((backdrop as HTMLDivElement).style.pointerEvents).toBe("auto");
+
+		act(() => {
+			(backdrop as HTMLDivElement).click();
+		});
+
+		// The frame stays mounted while the width transition retracts it, but the
+		// backdrop must stop swallowing taps (and clicks) as soon as it starts.
+		expect(getButtonByAriaLabel(container, "Expand Kanban agent")).toBeInstanceOf(HTMLButtonElement);
+		const retractingBackdrop = container.querySelector('[data-testid="kanban-agent-backdrop"]') as HTMLDivElement;
+		expect(retractingBackdrop.style.pointerEvents).toBe("none");
+
+		act(() => {
+			const transitionEnd = new Event("transitionend", { bubbles: true });
+			Object.defineProperty(transitionEnd, "propertyName", { value: "width" });
+			getSidebar(container).dispatchEvent(transitionEnd);
+		});
+
+		expect(container.querySelector('[data-testid="kanban-agent-backdrop"]')).toBeNull();
+	});
+
 	it("ignores expanded state when the projects section is active", () => {
 		act(() => {
 			root.render(

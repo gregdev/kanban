@@ -380,249 +380,272 @@ export function ProjectNavigationPanel({
 	}
 
 	return (
-		<aside
-			id={SIDEBAR_PANEL_ID}
-			className={cn(
-				"flex flex-col min-h-0 overflow-hidden bg-surface-1 shrink-0",
-				isMobile
-					? "fixed inset-y-0 left-0 z-50 shadow-2xl"
-					: keepExpandedFrame
-						? "fixed left-0 top-0 z-50 shadow-2xl"
-						: "relative",
-			)}
-			onAnimationEnd={isMobileClosing ? handleMobileCloseAnimationEnd : undefined}
-			onTransitionEnd={handleExpandedTransitionEnd}
-			style={
-				keepExpandedFrame
-					? {
-							width: isExpandedActive ? AGENT_EXPANDED_WIDTH_STYLE : sidebarWidth,
-							minWidth: 0,
-							maxWidth: "none",
-							height: "100svh",
-							borderRight: "1px solid var(--color-divider)",
-							boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
-							transition: prefersReducedMotion ? "none" : AGENT_EXPANDED_TRANSITION,
-						}
-					: isMobile
-						? {
-								width: "100vw",
-								animation: isMobileClosing
-									? "kb-sidebar-slide-out 200ms ease forwards"
-									: "kb-sidebar-slide-in 200ms ease",
-							}
-						: {
-								width: sidebarWidth,
-								minWidth: SIDEBAR_MIN_EXPANDED_WIDTH,
-								maxWidth: SIDEBAR_MAX_EXPANDED_WIDTH,
-								borderRight: "1px solid var(--color-divider)",
-							}
-			}
-		>
-			{!isMobile && !keepExpandedFrame && (
+		<>
+			{keepExpandedFrame ? (
+				// Dim the board behind the expanded agent and let a click/tap dismiss it.
+				// It stays mounted while the panel retracts so the two fades line up, but
+				// stops capturing input the moment the collapse starts. z-[45] keeps it
+				// above the expanded terminal sheet (z-40) yet below the panel (z-50).
 				<div
-					role="separator"
-					aria-orientation="vertical"
-					aria-label="Resize sidebar"
-					title="Drag to resize"
-					onMouseDown={startDrag}
-					className="group absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-accent/20"
-				>
-					<span
-						aria-hidden
-						className="absolute inset-y-0 right-0 w-px bg-transparent transition-colors group-hover:bg-accent"
-					/>
-				</div>
-			)}
-			<div style={{ padding: "12px 12px 8px" }}>
-				<div className="flex items-center justify-between">
-					<div className="font-semibold text-base flex items-baseline gap-1.5">
-						<ClineIcon size={18} className="text-text-primary shrink-0 self-center" />
-						Cline <span className="text-text-secondary font-normal text-xs">v{__APP_VERSION__}</span>
-					</div>
-					{isMobile ? (
-						<Button
-							variant="ghost"
-							size="sm"
-							icon={<Plus size={16} className="rotate-45" />}
-							onClick={() => setCollapsed(true)}
-							aria-label="Close sidebar"
-							className="min-w-[44px] min-h-[44px] -mr-2"
+					aria-hidden
+					data-testid="kanban-agent-backdrop"
+					onClick={isExpandedActive ? handleToggleExpanded : undefined}
+					className="fixed inset-0 z-[45] cursor-pointer bg-black/50 touch-none"
+					style={{
+						opacity: isExpandedActive ? 1 : 0,
+						pointerEvents: isExpandedActive ? "auto" : "none",
+						animation: prefersReducedMotion
+							? undefined
+							: isExpandedActive
+								? `kb-overlay-show ${AGENT_EXPANDED_TRANSITION_MS}ms ease`
+								: `kb-overlay-hide ${AGENT_EXPANDED_TRANSITION_MS}ms ease forwards`,
+					}}
+				/>
+			) : null}
+			<aside
+				id={SIDEBAR_PANEL_ID}
+				className={cn(
+					"flex flex-col min-h-0 overflow-hidden bg-surface-1 shrink-0",
+					isMobile
+						? "fixed inset-y-0 left-0 z-50 shadow-2xl"
+						: keepExpandedFrame
+							? "fixed left-0 top-0 z-50 shadow-2xl"
+							: "relative",
+				)}
+				onAnimationEnd={isMobileClosing ? handleMobileCloseAnimationEnd : undefined}
+				onTransitionEnd={handleExpandedTransitionEnd}
+				style={
+					keepExpandedFrame
+						? {
+								width: isExpandedActive ? AGENT_EXPANDED_WIDTH_STYLE : sidebarWidth,
+								minWidth: 0,
+								maxWidth: "none",
+								height: "100svh",
+								borderRight: "1px solid var(--color-divider)",
+								boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
+								transition: prefersReducedMotion ? "none" : AGENT_EXPANDED_TRANSITION,
+							}
+						: isMobile
+							? {
+									width: "100vw",
+									animation: isMobileClosing
+										? "kb-sidebar-slide-out 200ms ease forwards"
+										: "kb-sidebar-slide-in 200ms ease",
+								}
+							: {
+									width: sidebarWidth,
+									minWidth: SIDEBAR_MIN_EXPANDED_WIDTH,
+									maxWidth: SIDEBAR_MAX_EXPANDED_WIDTH,
+									borderRight: "1px solid var(--color-divider)",
+								}
+				}
+			>
+				{!isMobile && !keepExpandedFrame && (
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Resize sidebar"
+						title="Drag to resize"
+						onMouseDown={startDrag}
+						className="group absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-accent/20"
+					>
+						<span
+							aria-hidden
+							className="absolute inset-y-0 right-0 w-px bg-transparent transition-colors group-hover:bg-accent"
 						/>
-					) : activeSection === "agent" ? (
-						<Tooltip content={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}>
+					</div>
+				)}
+				<div style={{ padding: "12px 12px 8px" }}>
+					<div className="flex items-center justify-between">
+						<div className="font-semibold text-base flex items-baseline gap-1.5">
+							<ClineIcon size={18} className="text-text-primary shrink-0 self-center" />
+							Cline <span className="text-text-secondary font-normal text-xs">v{__APP_VERSION__}</span>
+						</div>
+						{isMobile ? (
 							<Button
 								variant="ghost"
 								size="sm"
-								icon={isExpandedActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-								onClick={handleToggleExpanded}
-								aria-label={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}
+								icon={<Plus size={16} className="rotate-45" />}
+								onClick={() => setCollapsed(true)}
+								aria-label="Close sidebar"
+								className="min-w-[44px] min-h-[44px] -mr-2"
 							/>
-						</Tooltip>
-					) : null}
-				</div>
-				<div className="mt-2 rounded-md bg-surface-2 border border-border p-1">
-					<div className="grid grid-cols-2 gap-1">
-						<button
-							type="button"
-							onClick={() => onActiveSectionChange("projects")}
-							className={cn(
-								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
-								activeSection === "projects"
-									? "bg-surface-4 text-text-primary border border-border"
-									: "text-text-secondary hover:text-text-primary border border-transparent",
-							)}
-						>
-							Projects
-						</button>
-						<button
-							type="button"
-							onClick={() => onActiveSectionChange("agent")}
-							disabled={!canShowAgentSection}
-							className={cn(
-								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
-								activeSection === "agent"
-									? "bg-surface-4 text-text-primary border border-border"
-									: "text-text-secondary hover:text-text-primary border border-transparent",
-								!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
-							)}
-						>
-							Kanban Agent
-						</button>
-					</div>
-				</div>
-			</div>
-
-			{activeSection === "projects" ? (
-				<>
-					<div
-						className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-1"
-						style={{ padding: "4px 12px" }}
-					>
-						{sortedProjects.length === 0 && isLoadingProjects ? (
-							<div style={{ padding: "4px 0" }}>
-								{Array.from({ length: 3 }).map((_, index) => (
-									<ProjectRowSkeleton key={`project-skeleton-${index}`} />
-								))}
-							</div>
+						) : activeSection === "agent" ? (
+							<Tooltip content={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}>
+								<Button
+									variant="ghost"
+									size="sm"
+									icon={isExpandedActive ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+									onClick={handleToggleExpanded}
+									aria-label={isExpandedActive ? "Collapse Kanban agent" : "Expand Kanban agent"}
+								/>
+							</Tooltip>
 						) : null}
-
-						{sortedProjects.map((project) => (
-							<ProjectRow
-								key={project.id}
-								project={project}
-								isCurrent={currentProjectId === project.id}
-								removingProjectId={removingProjectId}
-								onSelect={(projectId) => {
-									onSelectProject(projectId);
-									if (isMobile) {
-										setCollapsed(true);
-									}
-								}}
-								onRemove={(projectId) => {
-									const found = sortedProjects.find((item) => item.id === projectId);
-									if (!found) {
-										return;
-									}
-									setPendingProjectRemoval(found);
-								}}
-							/>
-						))}
-
-						{!isLoadingProjects ? (
+					</div>
+					<div className="mt-2 rounded-md bg-surface-2 border border-border p-1">
+						<div className="grid grid-cols-2 gap-1">
 							<button
 								type="button"
-								className="kb-project-row flex cursor-pointer items-center gap-1.5 rounded-md text-text-secondary hover:text-text-primary"
-								style={{ padding: "6px 8px" }}
-								onClick={onAddProject}
-								disabled={removingProjectId !== null}
+								onClick={() => onActiveSectionChange("projects")}
+								className={cn(
+									"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
+									activeSection === "projects"
+										? "bg-surface-4 text-text-primary border border-border"
+										: "text-text-secondary hover:text-text-primary border border-transparent",
+								)}
 							>
-								<Plus size={14} className="shrink-0" />
-								<span className="text-sm">Add Project</span>
+								Projects
 							</button>
-						) : null}
-					</div>
-					<ShortcutsCard />
-					<ProjectSupportFooter
-						shouldShowFeaturebaseFeedback={shouldShowFeaturebaseFeedback}
-						featurebaseFeedbackState={featurebaseFeedbackState}
-					/>
-				</>
-			) : (
-				<div className="flex flex-1 min-h-0 flex-col">
-					{selectedAgentId && selectedAgentId !== "cline" ? <TerminalAgentHints /> : null}
-					<div className="flex flex-1 min-h-0 overflow-hidden bg-surface-1 px-2 pb-2 pt-1">
-						{agentSectionContent ?? (
-							<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
-								Select a project to use the agent.
-							</div>
-						)}
+							<button
+								type="button"
+								onClick={() => onActiveSectionChange("agent")}
+								disabled={!canShowAgentSection}
+								className={cn(
+									"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
+									activeSection === "agent"
+										? "bg-surface-4 text-text-primary border border-border"
+										: "text-text-secondary hover:text-text-primary border border-transparent",
+									!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
+								)}
+							>
+								Kanban Agent
+							</button>
+						</div>
 					</div>
 				</div>
-			)}
-			<AlertDialog
-				open={pendingProjectRemoval !== null}
-				onOpenChange={(open) => {
-					if (!open && !isProjectRemovalPending) {
-						setPendingProjectRemoval(null);
-					}
-				}}
-			>
-				<AlertDialogHeader>
-					<AlertDialogTitle>Remove Project</AlertDialogTitle>
-				</AlertDialogHeader>
-				<AlertDialogBody>
-					<AlertDialogDescription asChild>
-						<div className="flex flex-col gap-3">
-							<p>{pendingProjectRemoval ? pendingProjectRemoval.name : "This project"}</p>
-							<p className="text-text-primary">
-								This will delete all project tasks ({pendingProjectTaskCount}), remove task
-								workspaces/worktrees, and stop any running processes for this project.
-							</p>
-							<p className="text-text-primary">This action cannot be undone.</p>
+
+				{activeSection === "projects" ? (
+					<>
+						<div
+							className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-1"
+							style={{ padding: "4px 12px" }}
+						>
+							{sortedProjects.length === 0 && isLoadingProjects ? (
+								<div style={{ padding: "4px 0" }}>
+									{Array.from({ length: 3 }).map((_, index) => (
+										<ProjectRowSkeleton key={`project-skeleton-${index}`} />
+									))}
+								</div>
+							) : null}
+
+							{sortedProjects.map((project) => (
+								<ProjectRow
+									key={project.id}
+									project={project}
+									isCurrent={currentProjectId === project.id}
+									removingProjectId={removingProjectId}
+									onSelect={(projectId) => {
+										onSelectProject(projectId);
+										if (isMobile) {
+											setCollapsed(true);
+										}
+									}}
+									onRemove={(projectId) => {
+										const found = sortedProjects.find((item) => item.id === projectId);
+										if (!found) {
+											return;
+										}
+										setPendingProjectRemoval(found);
+									}}
+								/>
+							))}
+
+							{!isLoadingProjects ? (
+								<button
+									type="button"
+									className="kb-project-row flex cursor-pointer items-center gap-1.5 rounded-md text-text-secondary hover:text-text-primary"
+									style={{ padding: "6px 8px" }}
+									onClick={onAddProject}
+									disabled={removingProjectId !== null}
+								>
+									<Plus size={14} className="shrink-0" />
+									<span className="text-sm">Add Project</span>
+								</button>
+							) : null}
 						</div>
-					</AlertDialogDescription>
-				</AlertDialogBody>
-				<AlertDialogFooter>
-					<AlertDialogCancel asChild>
-						<Button
-							variant="default"
-							disabled={isProjectRemovalPending}
-							onClick={() => {
-								if (!isProjectRemovalPending) {
-									setPendingProjectRemoval(null);
-								}
-							}}
-						>
-							Cancel
-						</Button>
-					</AlertDialogCancel>
-					<AlertDialogAction asChild>
-						<Button
-							variant="danger"
-							disabled={isProjectRemovalPending}
-							onClick={async () => {
-								if (!pendingProjectRemoval) {
-									return;
-								}
-								const removed = await onRemoveProject(pendingProjectRemoval.id);
-								if (removed) {
-									setPendingProjectRemoval(null);
-								}
-							}}
-						>
-							{isProjectRemovalPending ? (
-								<>
-									<Spinner size={14} />
-									Removing...
-								</>
-							) : (
-								"Remove Project"
+						<ShortcutsCard />
+						<ProjectSupportFooter
+							shouldShowFeaturebaseFeedback={shouldShowFeaturebaseFeedback}
+							featurebaseFeedbackState={featurebaseFeedbackState}
+						/>
+					</>
+				) : (
+					<div className="flex flex-1 min-h-0 flex-col">
+						{selectedAgentId && selectedAgentId !== "cline" ? <TerminalAgentHints /> : null}
+						<div className="flex flex-1 min-h-0 overflow-hidden bg-surface-1 px-2 pb-2 pt-1">
+							{agentSectionContent ?? (
+								<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
+									Select a project to use the agent.
+								</div>
 							)}
-						</Button>
-					</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialog>
-		</aside>
+						</div>
+					</div>
+				)}
+				<AlertDialog
+					open={pendingProjectRemoval !== null}
+					onOpenChange={(open) => {
+						if (!open && !isProjectRemovalPending) {
+							setPendingProjectRemoval(null);
+						}
+					}}
+				>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Remove Project</AlertDialogTitle>
+					</AlertDialogHeader>
+					<AlertDialogBody>
+						<AlertDialogDescription asChild>
+							<div className="flex flex-col gap-3">
+								<p>{pendingProjectRemoval ? pendingProjectRemoval.name : "This project"}</p>
+								<p className="text-text-primary">
+									This will delete all project tasks ({pendingProjectTaskCount}), remove task
+									workspaces/worktrees, and stop any running processes for this project.
+								</p>
+								<p className="text-text-primary">This action cannot be undone.</p>
+							</div>
+						</AlertDialogDescription>
+					</AlertDialogBody>
+					<AlertDialogFooter>
+						<AlertDialogCancel asChild>
+							<Button
+								variant="default"
+								disabled={isProjectRemovalPending}
+								onClick={() => {
+									if (!isProjectRemovalPending) {
+										setPendingProjectRemoval(null);
+									}
+								}}
+							>
+								Cancel
+							</Button>
+						</AlertDialogCancel>
+						<AlertDialogAction asChild>
+							<Button
+								variant="danger"
+								disabled={isProjectRemovalPending}
+								onClick={async () => {
+									if (!pendingProjectRemoval) {
+										return;
+									}
+									const removed = await onRemoveProject(pendingProjectRemoval.id);
+									if (removed) {
+										setPendingProjectRemoval(null);
+									}
+								}}
+							>
+								{isProjectRemovalPending ? (
+									<>
+										<Spinner size={14} />
+										Removing...
+									</>
+								) : (
+									"Remove Project"
+								)}
+							</Button>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialog>
+			</aside>
+		</>
 	);
 }
 
