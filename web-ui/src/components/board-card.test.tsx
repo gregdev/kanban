@@ -11,6 +11,11 @@ import type { ReviewTaskWorkspaceSnapshot } from "@/types";
 let mockWorkspaceSnapshot: ReviewTaskWorkspaceSnapshot | undefined;
 let mockMeasureWidths = [240, 240, 240];
 let mockMeasureCallCount = 0;
+let mockIsMobile = false;
+
+vi.mock("@/hooks/use-is-mobile", () => ({
+	useIsMobile: () => mockIsMobile,
+}));
 
 vi.mock("@hello-pangea/dnd", () => ({
 	Draggable: ({
@@ -115,6 +120,27 @@ function createSummary(
 	};
 }
 
+function getTaskActionsButton(container: HTMLElement): HTMLButtonElement | null {
+	return container.querySelector('button[aria-label="Task actions"]');
+}
+
+function getMenuItemLabels(): string[] {
+	return Array.from(document.body.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent?.trim() ?? "");
+}
+
+function findMenuItem(label: string): HTMLElement | undefined {
+	return Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+		(item) => item.textContent?.trim() === label,
+	);
+}
+
+/** Radix dropdown triggers open from the trigger's pointerdown, not a click. */
+async function openTaskActionsMenu(container: HTMLElement): Promise<void> {
+	await act(async () => {
+		getTaskActionsButton(container)?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+	});
+}
+
 function Harness(): React.ReactElement {
 	const [card, setCard] = useState(
 		createCard({
@@ -147,6 +173,7 @@ describe("BoardCard", () => {
 		mockWorkspaceSnapshot = undefined;
 		mockMeasureWidths = [240, 240, 240];
 		mockMeasureCallCount = 0;
+		mockIsMobile = false;
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -952,5 +979,147 @@ describe("BoardCard", () => {
 
 		expect(onDependencyLinkSelect).toHaveBeenCalledWith("task-2");
 		expect(onClick).not.toHaveBeenCalled();
+	});
+
+	it("renders the overflow button with an accessible name that advertises its menu", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" onClick={() => {}} />);
+		});
+
+		const overflowButton = getTaskActionsButton(container);
+		expect(overflowButton).toBeInstanceOf(HTMLButtonElement);
+		expect(overflowButton?.getAttribute("aria-haspopup")).toBe("menu");
+		expect(overflowButton?.getAttribute("aria-expanded")).toBe("false");
+	});
+
+	it("opens the same actions from the overflow button as from the context menu", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="backlog"
+					onClick={() => {}}
+					onSaveTitle={() => {}}
+					onStart={() => {}}
+					onMoveToTrash={() => {}}
+					onBeginDependencyLink={() => {}}
+					canBeginDependencyLink
+				/>,
+			);
+		});
+
+		await openTaskActionsMenu(container);
+		const overflowLabels = getMenuItemLabels();
+		expect(overflowLabels).toEqual(["Edit task", "Rename task", "Start task", "Link to Task", "Move to Done"]);
+		expect(getTaskActionsButton(container)?.getAttribute("aria-expanded")).toBe("true");
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		});
+		expect(document.body.querySelector('[role="menu"]')).toBeNull();
+		expect(getTaskActionsButton(container)?.getAttribute("aria-expanded")).toBe("false");
+
+		const card = container.querySelector('[data-task-id="task-1"]');
+		await act(async () => {
+			card?.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					bubbles: true,
+					cancelable: true,
+					clientX: 10,
+					clientY: 10,
+				}),
+			);
+		});
+
+		expect(getMenuItemLabels()).toEqual(overflowLabels);
+	});
+
+	it("runs the same handler from the overflow button as from the context menu", async () => {
+		const onStart = vi.fn();
+
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" onStart={onStart} />);
+		});
+
+		await openTaskActionsMenu(container);
+		await act(async () => {
+			findMenuItem("Start task")?.click();
+		});
+		expect(onStart).toHaveBeenCalledTimes(1);
+		expect(onStart).toHaveBeenCalledWith("task-1");
+
+		const card = container.querySelector('[data-task-id="task-1"]');
+		await act(async () => {
+			card?.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					bubbles: true,
+					cancelable: true,
+					clientX: 10,
+					clientY: 10,
+				}),
+			);
+		});
+		await act(async () => {
+			findMenuItem("Start task")?.click();
+		});
+		expect(onStart).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not open the card when the overflow button is pressed", async () => {
+		const onClick = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<BoardCard card={createCard()} index={0} columnId="backlog" onClick={onClick} onStart={() => {}} />,
+			);
+		});
+
+		const overflowButton = getTaskActionsButton(container);
+		await act(async () => {
+			overflowButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			overflowButton?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+			overflowButton?.click();
+		});
+		expect(onClick).not.toHaveBeenCalled();
+
+		// A tap/click opens the menu through the trigger's pointerdown, and must
+		// still leave the card itself untouched.
+		await openTaskActionsMenu(container);
+		expect(document.body.querySelector('[role="menu"]')).toBeInstanceOf(HTMLElement);
+		expect(onClick).not.toHaveBeenCalled();
+	});
+
+	it("hides the overflow button until the card is hovered on desktop", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" onClick={() => {}} />);
+		});
+
+		const overflowButton = getTaskActionsButton(container);
+		expect(overflowButton?.className).toContain("opacity-0");
+		expect(overflowButton?.className).toContain("group-hover/card:opacity-100");
+		expect(overflowButton?.className).toContain("focus-visible:opacity-100");
+	});
+
+	it("always shows a larger tap target for the overflow button on mobile", async () => {
+		mockIsMobile = true;
+
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" onClick={() => {}} />);
+		});
+
+		const overflowButton = getTaskActionsButton(container);
+		expect(overflowButton).toBeInstanceOf(HTMLButtonElement);
+		expect(overflowButton?.className).not.toContain("opacity-0");
+		expect(overflowButton?.className).toContain("h-9");
+		expect(overflowButton?.className).toContain("w-9");
+	});
+
+	it("omits the overflow button when the card has no actions", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" />);
+		});
+
+		expect(getTaskActionsButton(container)).toBeNull();
 	});
 });

@@ -20,7 +20,9 @@ import {
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ContextMenuArea, type ContextMenuItemSpec, type ContextMenuSectionSpec } from "@/components/ui/context-menu";
+import { BoardCardOverflowMenu } from "@/components/board-card-overflow-menu";
+import { ContextMenuArea } from "@/components/ui/context-menu";
+import { type MenuItemSpec, type MenuSectionSpec } from "@/components/ui/menu-sections";
 import { NextUpTasksBadge } from "@/components/dependencies/next-up-tasks-badge";
 import {
 	formatClineReasoningEffortLabel,
@@ -497,7 +499,9 @@ export function BoardCard({
 
 	const activeDescriptionDisplay = isDescriptionExpanded ? descriptionDisplay.expanded : descriptionDisplay.collapsed;
 
-	const contextMenuSections = useMemo<ContextMenuSectionSpec[]>(() => {
+	// Single source of truth for the card's actions: the same sections feed the
+	// right-click menu and the overflow dropdown.
+	const cardActionSections = useMemo<MenuSectionSpec[]>(() => {
 		if (isTrashCard) {
 			if (!onRestoreFromTrash) {
 				return [];
@@ -517,8 +521,8 @@ export function BoardCard({
 			];
 		}
 
-		const sections: ContextMenuSectionSpec[] = [];
-		const primaryItems: ContextMenuItemSpec[] = [];
+		const sections: MenuSectionSpec[] = [];
+		const primaryItems: MenuItemSpec[] = [];
 		if (onClick) {
 			primaryItems.push({
 				id: "open",
@@ -542,7 +546,7 @@ export function BoardCard({
 			sections.push({ id: "primary", items: primaryItems });
 		}
 
-		const actionItems: ContextMenuItemSpec[] = [];
+		const actionItems: MenuItemSpec[] = [];
 		if (columnId === "backlog" && onStart) {
 			actionItems.push({
 				id: "start",
@@ -702,6 +706,7 @@ export function BoardCard({
 							className={cn(
 								"rounded-md border border-border-bright bg-surface-2 p-2.5",
 								"cursor-pointer hover:bg-surface-3 hover:border-border-bright",
+								"group/card",
 								isDragging && "shadow-lg",
 								isHovered && "bg-surface-3 border-border-bright",
 								isDependencySource && "kb-board-card-dependency-source",
@@ -813,6 +818,7 @@ export function BoardCard({
 										/>
 									</Tooltip>
 								) : null}
+								<BoardCardOverflowMenu sections={cardActionSections} />
 							</div>
 							{needsInput ? (
 								<div className="mt-1.5">
@@ -1019,7 +1025,7 @@ export function BoardCard({
 					</div>
 				);
 
-				const draggableContent = <ContextMenuArea sections={contextMenuSections}>{cardContent}</ContextMenuArea>;
+				const draggableContent = <ContextMenuArea sections={cardActionSections}>{cardContent}</ContextMenuArea>;
 
 				if (isDragging && typeof document !== "undefined") {
 					return createPortal(draggableContent, document.body);
