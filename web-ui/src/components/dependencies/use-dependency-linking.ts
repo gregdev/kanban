@@ -6,6 +6,13 @@ export interface DependencyLinkDraft {
 	targetTaskId: string | null;
 	pointerClientX: number;
 	pointerClientY: number;
+	/**
+	 * Armed drafts come from the card menu ("Link to Task") instead of a held
+	 * modifier key. They stay active until the user picks a task, presses
+	 * Escape, or clicks outside the board, and they complete on a plain
+	 * click/tap rather than on the mouseup that ends a modifier drag.
+	 */
+	armed: boolean;
 }
 
 const CARD_GAP_CAPTURE_PX = 16;
@@ -76,6 +83,23 @@ function getTaskIdFromPoint(clientX: number, clientY: number): string | null {
 	return null;
 }
 
+function getTaskCenterPoint(taskId: string): { clientX: number; clientY: number } | null {
+	if (typeof document === "undefined") {
+		return null;
+	}
+	for (const element of document.querySelectorAll<HTMLElement>("[data-task-id]")) {
+		if (element.dataset.taskId !== taskId) {
+			continue;
+		}
+		const rect = element.getBoundingClientRect();
+		return {
+			clientX: rect.left + rect.width / 2,
+			clientY: rect.top + rect.height / 2,
+		};
+	}
+	return null;
+}
+
 export function useDependencyLinking({
 	canLinkTasks,
 	onCreateDependency,
@@ -86,6 +110,10 @@ export function useDependencyLinking({
 	draft: DependencyLinkDraft | null;
 	onDependencyPointerDown: (taskId: string, event: ReactMouseEvent<HTMLElement>) => void;
 	onDependencyPointerEnter: (taskId: string) => void;
+	/** Starts a click/tap link from the card menu without holding a modifier. */
+	onDependencyLinkStart: (taskId: string) => void;
+	/** Completes the armed link when another card is clicked or tapped. */
+	onDependencyLinkSelect: (taskId: string) => void;
 } {
 	const [draft, setDraft] = useState<DependencyLinkDraft | null>(null);
 	const draftRef = useRef<DependencyLinkDraft | null>(null);
@@ -117,6 +145,43 @@ export function useDependencyLinking({
 			return true;
 		},
 		[getValidTargetTaskId, onCreateDependency],
+	);
+
+	const cancelDependencyLink = useCallback(() => {
+		draftRef.current = null;
+		setDraft(null);
+	}, []);
+
+	// Menu-driven linking ("Link to Task") parks a draft on the source card and
+	// waits for a click/tap on the target instead of tracking a held modifier.
+	const handleDependencyLinkStart = useCallback((taskId: string) => {
+		const center = getTaskCenterPoint(taskId);
+		const nextDraft: DependencyLinkDraft = {
+			sourceTaskId: taskId,
+			targetTaskId: null,
+			pointerClientX: center?.clientX ?? 0,
+			pointerClientY: center?.clientY ?? 0,
+			armed: true,
+		};
+		draftRef.current = nextDraft;
+		setDraft(nextDraft);
+	}, []);
+
+	const handleDependencyLinkSelect = useCallback(
+		(taskId: string) => {
+			const current = draftRef.current;
+			if (!current?.armed) {
+				return;
+			}
+			// Tapping the source again is the natural cancel gesture. Every other
+			// target is handed to onCreateDependency unfiltered so an invalid pair
+			// surfaces the same reason a CLI link failure would.
+			if (taskId !== current.sourceTaskId) {
+				onCreateDependency?.(current.sourceTaskId, taskId);
+			}
+			cancelDependencyLink();
+		},
+		[cancelDependencyLink, onCreateDependency],
 	);
 
 	useEffect(() => {
@@ -163,41 +228,55 @@ export function useDependencyLinking({
 					current.sourceTaskId,
 					getTaskIdFromPoint(event.clientX, event.clientY),
 				);
-				return {
+				const nextDraft = {
 					...current,
 					pointerClientX: event.clientX,
 					pointerClientY: event.clientY,
 					targetTaskId,
 				};
+				draftRef.current = nextDraft;
+				return nextDraft;
 			});
 		};
 
 		const handleMouseUp = (event: MouseEvent) => {
-			setDraft(() => {
-				const current = draftRef.current;
-				if (!current) {
-					return null;
-				}
-				const resolvedTargetTaskId = getValidTargetTaskId(
-					current.sourceTaskId,
-					getTaskIdFromPoint(event.clientX, event.clientY) ?? current.targetTaskId,
-				);
-				if (modifierPressedRef.current && completeDependencyLink(resolvedTargetTaskId ?? null)) {
-					return null;
-				}
-				if (!modifierPressedRef.current) {
-					draftRef.current = null;
-					return null;
-				}
-				const nextDraft = {
+			const current = draftRef.current;
+			if (!current) {
+				return;
+			}
+			const resolvedTargetTaskId = getValidTargetTaskId(
+				current.sourceTaskId,
+				getTaskIdFromPoint(event.clientX, event.clientY) ?? current.targetTaskId,
+			);
+			// Armed drafts only end through an explicit target click, Escape, or a
+			// click outside the board, so the mouseup that ends a tap is ignored.
+			if (current.armed) {
+				const armedDraft = {
 					...current,
 					targetTaskId: resolvedTargetTaskId ?? null,
 					pointerClientX: event.clientX,
 					pointerClientY: event.clientY,
 				};
-				draftRef.current = nextDraft;
-				return nextDraft;
-			});
+				draftRef.current = armedDraft;
+				setDraft(armedDraft);
+				return;
+			}
+			if (modifierPressedRef.current && completeDependencyLink(resolvedTargetTaskId ?? null)) {
+				return;
+			}
+			if (!modifierPressedRef.current) {
+				draftRef.current = null;
+				setDraft(null);
+				return;
+			}
+			const nextDraft = {
+				...current,
+				targetTaskId: resolvedTargetTaskId ?? null,
+				pointerClientX: event.clientX,
+				pointerClientY: event.clientY,
+			};
+			draftRef.current = nextDraft;
+			setDraft(nextDraft);
 		};
 
 		const handleModifierRelease = (event: KeyboardEvent) => {
@@ -206,7 +285,7 @@ export function useDependencyLinking({
 			}
 			modifierPressedRef.current = false;
 			const current = draftRef.current;
-			if (!current) {
+			if (!current || current.armed) {
 				return;
 			}
 			const resolvedTargetTaskId = getValidTargetTaskId(
@@ -220,16 +299,41 @@ export function useDependencyLinking({
 			setDraft(null);
 		};
 
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || !draftRef.current?.armed) {
+				return;
+			}
+			event.preventDefault();
+			cancelDependencyLink();
+		};
+
+		const handleClickAway = (event: MouseEvent) => {
+			if (!draftRef.current?.armed) {
+				return;
+			}
+			const target = event.target;
+			// Card clicks reach handleDependencyLinkSelect first; anything else
+			// (empty column space, the navbar, dialogs) cancels the armed link.
+			if (target instanceof Element && target.closest("[data-task-id]")) {
+				return;
+			}
+			cancelDependencyLink();
+		};
+
 		window.addEventListener("mousemove", handleMouseMove);
 		window.addEventListener("mouseup", handleMouseUp);
 		window.addEventListener("keyup", handleModifierRelease);
+		window.addEventListener("keydown", handleEscape);
+		window.addEventListener("click", handleClickAway);
 		return () => {
 			document.body.classList.remove("kb-dependency-link-mode");
 			window.removeEventListener("mousemove", handleMouseMove);
 			window.removeEventListener("mouseup", handleMouseUp);
 			window.removeEventListener("keyup", handleModifierRelease);
+			window.removeEventListener("keydown", handleEscape);
+			window.removeEventListener("click", handleClickAway);
 		};
-	}, [completeDependencyLink, getValidTargetTaskId, isLinking]);
+	}, [cancelDependencyLink, completeDependencyLink, getValidTargetTaskId, isLinking]);
 
 	const handleDependencyPointerDown = useCallback((taskId: string, event: ReactMouseEvent<HTMLElement>) => {
 		modifierPressedRef.current = event.metaKey || event.ctrlKey;
@@ -243,6 +347,7 @@ export function useDependencyLinking({
 				targetTaskId: null,
 				pointerClientX: event.clientX,
 				pointerClientY: event.clientY,
+				armed: false,
 			};
 			draftRef.current = nextDraft;
 			return nextDraft;
@@ -270,5 +375,7 @@ export function useDependencyLinking({
 		draft,
 		onDependencyPointerDown: handleDependencyPointerDown,
 		onDependencyPointerEnter: handleDependencyPointerEnter,
+		onDependencyLinkStart: handleDependencyLinkStart,
+		onDependencyLinkSelect: handleDependencyLinkSelect,
 	};
 }

@@ -58,6 +58,8 @@ vi.mock("@/components/dependencies/use-dependency-linking", () => ({
 		draft: null,
 		onDependencyPointerDown: vi.fn(),
 		onDependencyPointerEnter: vi.fn(),
+		onDependencyLinkStart: vi.fn(),
+		onDependencyLinkSelect: vi.fn(),
 	}),
 }));
 

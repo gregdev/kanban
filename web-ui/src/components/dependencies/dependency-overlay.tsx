@@ -859,6 +859,12 @@ export function DependencyOverlay({
 		if (!draft) {
 			return null;
 		}
+		// An armed ("Link to Task") draft has no pointer preview to follow, so it
+		// only draws once a target card resolves; otherwise it would render a
+		// stray arrow curled up on the source card itself.
+		if (draft.armed && !draft.targetTaskId) {
+			return null;
+		}
 		const sourceAnchor = layout.anchors[draft.sourceTaskId];
 		if (!sourceAnchor) {
 			return null;

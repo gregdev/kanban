@@ -98,6 +98,19 @@ export function KanbanBoard({
 		onCreateDependency,
 	});
 	const nextUpTasksByTaskId = useMemo(() => getNextUpTasksByTaskId(data), [data]);
+	// A card may offer "Link to Task" only when at least one other card on the
+	// board would be an acceptable link. Reuse the same predicate that gates
+	// modifier-drag linking so menu and drag cannot disagree.
+	const linkableTaskIds = useMemo(() => {
+		const taskIds = data.columns.flatMap((column) => column.cards.map((card) => card.id));
+		const linkable = new Set<string>();
+		for (const taskId of taskIds) {
+			if (taskIds.some((candidateId) => canCreateTaskDependency(data, taskId, candidateId))) {
+				linkable.add(taskId);
+			}
+		}
+		return linkable;
+	}, [data]);
 
 	useEffect(() => {
 		latestDataRef.current = data;
@@ -408,6 +421,9 @@ export function KanbanBoard({
 						programmaticCardMoveInFlight={programmaticCardMoveInFlight}
 						onDependencyPointerDown={dependencyLinking.onDependencyPointerDown}
 						onDependencyPointerEnter={dependencyLinking.onDependencyPointerEnter}
+						onDependencyLinkSelect={dependencyLinking.onDependencyLinkSelect}
+						onBeginDependencyLink={dependencyLinking.onDependencyLinkStart}
+						linkableTaskIds={linkableTaskIds}
 						dependencySourceTaskId={dependencyLinking.draft?.sourceTaskId ?? null}
 						dependencyTargetTaskId={dependencyLinking.draft?.targetTaskId ?? null}
 						isDependencyLinking={dependencyLinking.draft !== null}

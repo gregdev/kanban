@@ -458,6 +458,12 @@ body.kb-dependency-link-mode {
   user-select: none;
 }
 
+/* While a link is being drawn or is armed from the card menu, every card is a
+   link target. Card-internal buttons must not swallow that click. */
+body.kb-dependency-link-mode .kb-board-card-shell button {
+  pointer-events: none;
+}
+
 .kb-empty-state-center {
   display: flex;
   height: 100%;

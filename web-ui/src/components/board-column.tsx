@@ -36,6 +36,9 @@ export function BoardColumn({
 	programmaticCardMoveInFlight,
 	onDependencyPointerDown,
 	onDependencyPointerEnter,
+	onDependencyLinkSelect,
+	onBeginDependencyLink,
+	linkableTaskIds,
 	dependencySourceTaskId,
 	dependencyTargetTaskId,
 	isDependencyLinking,
@@ -67,6 +70,9 @@ export function BoardColumn({
 	programmaticCardMoveInFlight?: ProgrammaticCardMoveInFlight | null;
 	onDependencyPointerDown?: (taskId: string, event: ReactMouseEvent<HTMLElement>) => void;
 	onDependencyPointerEnter?: (taskId: string) => void;
+	onDependencyLinkSelect?: (taskId: string) => void;
+	onBeginDependencyLink?: (taskId: string) => void;
+	linkableTaskIds?: ReadonlySet<string>;
 	dependencySourceTaskId?: string | null;
 	dependencyTargetTaskId?: string | null;
 	isDependencyLinking?: boolean;
@@ -192,6 +198,9 @@ export function BoardColumn({
 											isMoveToTrashLoading={moveToTrashLoadingById?.[card.id] ?? false}
 											onDependencyPointerDown={onDependencyPointerDown}
 											onDependencyPointerEnter={onDependencyPointerEnter}
+											onDependencyLinkSelect={onDependencyLinkSelect}
+											onBeginDependencyLink={onBeginDependencyLink}
+											canBeginDependencyLink={linkableTaskIds?.has(card.id) ?? false}
 											isDependencySource={dependencySourceTaskId === card.id}
 											isDependencyTarget={dependencyTargetTaskId === card.id}
 											isDependencyLinking={isDependencyLinking}

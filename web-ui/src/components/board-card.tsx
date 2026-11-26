@@ -11,6 +11,7 @@ import {
 	GitBranch,
 	GitCommit,
 	GitPullRequest,
+	Link2,
 	Pencil,
 	Play,
 	RotateCcw,
@@ -247,6 +248,9 @@ export function BoardCard({
 	isMoveToTrashLoading = false,
 	onDependencyPointerDown,
 	onDependencyPointerEnter,
+	onDependencyLinkSelect,
+	onBeginDependencyLink,
+	canBeginDependencyLink = false,
 	isDependencySource = false,
 	isDependencyTarget = false,
 	isDependencyLinking = false,
@@ -272,6 +276,12 @@ export function BoardCard({
 	isMoveToTrashLoading?: boolean;
 	onDependencyPointerDown?: (taskId: string, event: MouseEvent<HTMLElement>) => void;
 	onDependencyPointerEnter?: (taskId: string) => void;
+	/** Completes an armed "Link to Task" when this card is clicked or tapped. */
+	onDependencyLinkSelect?: (taskId: string) => void;
+	/** Starts a click/tap link from this card's overflow menu. */
+	onBeginDependencyLink?: (taskId: string) => void;
+	/** Whether this card has at least one task it could link to. */
+	canBeginDependencyLink?: boolean;
 	isDependencySource?: boolean;
 	isDependencyTarget?: boolean;
 	isDependencyLinking?: boolean;
@@ -559,6 +569,14 @@ export function BoardCard({
 				onSelect: () => onOpenPr(card.id),
 			});
 		}
+		if (onBeginDependencyLink && canBeginDependencyLink) {
+			actionItems.push({
+				id: "link-to-task",
+				label: "Link to Task",
+				icon: Link2,
+				onSelect: () => onBeginDependencyLink(card.id),
+			});
+		}
 		if (onMoveToTrash) {
 			actionItems.push({
 				id: "move-to-done",
@@ -589,6 +607,7 @@ export function BoardCard({
 
 		return sections;
 	}, [
+		canBeginDependencyLink,
 		cancelAutomaticActionLabel,
 		card.id,
 		card.title,
@@ -596,6 +615,7 @@ export function BoardCard({
 		isAnyGitActionLoading,
 		isMoveToTrashLoading,
 		isTrashCard,
+		onBeginDependencyLink,
 		onCancelAutomaticAction,
 		onClick,
 		onCommit,
@@ -645,6 +665,9 @@ export function BoardCard({
 							if (isDependencyLinking) {
 								event.preventDefault();
 								event.stopPropagation();
+								// While a "Link to Task" is armed a tap/click on this card
+								// is the target selection, not a request to open it.
+								onDependencyLinkSelect?.(card.id);
 								return;
 							}
 							if (event.metaKey || event.ctrlKey) {

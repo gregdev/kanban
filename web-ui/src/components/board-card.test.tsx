@@ -863,4 +863,94 @@ describe("BoardCard", () => {
 		expect(menuItemLabels).toContain("Move to Done");
 		expect(menuItemLabels).not.toContain("Open PR");
 	});
+
+	it("starts a click-to-link from the card context menu", async () => {
+		const onBeginDependencyLink = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="backlog"
+					onBeginDependencyLink={onBeginDependencyLink}
+					canBeginDependencyLink
+				/>,
+			);
+		});
+
+		const card = container.querySelector('[data-task-id="task-1"]');
+		expect(card).toBeInstanceOf(HTMLElement);
+
+		await act(async () => {
+			card?.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					bubbles: true,
+					cancelable: true,
+					clientX: 10,
+					clientY: 10,
+				}),
+			);
+		});
+
+		const linkItem = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find(
+			(item) => item.textContent?.trim() === "Link to Task",
+		);
+		expect(linkItem).toBeInstanceOf(HTMLElement);
+
+		await act(async () => {
+			(linkItem as HTMLElement).click();
+		});
+
+		expect(onBeginDependencyLink).toHaveBeenCalledWith("task-1");
+	});
+
+	it("hides Link to Task when no other task can be linked", async () => {
+		await act(async () => {
+			root.render(<BoardCard card={createCard()} index={0} columnId="backlog" onBeginDependencyLink={() => {}} />);
+		});
+
+		const card = container.querySelector('[data-task-id="task-1"]');
+		await act(async () => {
+			card?.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					bubbles: true,
+					cancelable: true,
+					clientX: 10,
+					clientY: 10,
+				}),
+			);
+		});
+
+		const menuItemLabels = Array.from(document.body.querySelectorAll('[role="menuitem"]')).map((item) =>
+			item.textContent?.trim(),
+		);
+		expect(menuItemLabels).not.toContain("Link to Task");
+	});
+
+	it("completes an armed link when the card is clicked instead of opening it", async () => {
+		const onClick = vi.fn();
+		const onDependencyLinkSelect = vi.fn();
+
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard({ id: "task-2" })}
+					index={0}
+					columnId="review"
+					isDependencyLinking
+					onClick={onClick}
+					onDependencyLinkSelect={onDependencyLinkSelect}
+				/>,
+			);
+		});
+
+		const card = container.querySelector('[data-task-id="task-2"]');
+		await act(async () => {
+			card?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		expect(onDependencyLinkSelect).toHaveBeenCalledWith("task-2");
+		expect(onClick).not.toHaveBeenCalled();
+	});
 });
